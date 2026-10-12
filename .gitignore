@@ -1,0 +1,15 @@
+# Pythoni ajutised failid
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Jupyteri ajutised failid
+.ipynb_checkpoints/
+
+# IDE failid
+.idea/
+.vscode/
+
+# Andmestik
+data/raw/*.csv
