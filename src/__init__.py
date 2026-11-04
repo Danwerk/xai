@@ -1,0 +1,1 @@
+"""Reprodutseeritav elektrikoormuse prognoosivigade diagnostika."""

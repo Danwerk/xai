@@ -1,0 +1,2 @@
+# Valikuline koodivormindaja; mudelite käivitamine seda ei vaja.
+black==26.10.1

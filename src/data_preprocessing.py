@@ -1,55 +1,98 @@
+"""Validate source observations without deleting unusual values."""
+
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RAW_PATH = PROJECT_ROOT / "data" / "raw" / "continuous dataset.csv"
-CLEANED_PATH = PROJECT_ROOT / "data" / "processed" / "cleaned_data.csv"
+from .common import ROOT, write_json
 
-def prepare_data(path: Path) -> pd.DataFrame:
-    """Parse, sort, and validate data without deleting rows or outliers."""
+RAW_PATH = ROOT / "data/raw/continuous dataset.csv"
+WEATHER = [f"{v}_{c}" for c in ("toc", "san", "dav") for v in ("T2M", "QV2M", "TQL", "W2M")]
+
+
+def load_and_audit(path):
+    if not Path(path).is_file():
+        raise FileNotFoundError(
+            f"Algandmestik puudub: {path}. Lisa tegelik CSV; sünteetilist asendust ei looda."
+        )
     df = pd.read_csv(path)
-
-    required = {"datetime", "nat_demand"}
-    missing_columns = required - set(df.columns)
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {sorted(missing_columns)}")
-
-    df["datetime"] = pd.to_datetime(
-        df["datetime"], format="%Y-%m-%d %H:%M:%S", errors="raise"
-    )
+    df.columns = df.columns.str.strip()
+    required = {"datetime", "nat_demand", *WEATHER, "holiday", "school", "Holiday_ID"}
+    if missing := required - set(df):
+        raise ValueError(f"Puuduvad veerud: {sorted(missing)}")
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="raise")
+    if df.datetime.isna().any() or df.datetime.dt.tz is not None:
+        raise ValueError("Oodatakse kehtivaid kohaliku Panama aja ajatempleid ilma nihketa.")
+    original_types = df.dtypes.astype(str).to_dict()
+    for col in required - {"datetime"}:
+        df[col] = pd.to_numeric(df[col], errors="raise")
+    sorted_before = df.datetime.is_monotonic_increasing
+    duplicate_rows = int(df.duplicated().sum())
     df = df.sort_values("datetime").reset_index(drop=True)
+    numeric = df.select_dtypes("number")
+    delta = df.datetime.diff().dropna()
+    audit = {
+        "rows": len(df),
+        "columns": len(df.columns),
+        "first": str(df.datetime.min()),
+        "last": str(df.datetime.max()),
+        "original_dtypes": original_types,
+        "missing_by_column": df.isna().sum().to_dict(),
+        "duplicate_rows": duplicate_rows,
+        "duplicate_timestamps": int(df.datetime.duplicated().sum()),
+        "non_hourly_intervals": int(delta.ne(pd.Timedelta(hours=1)).sum()),
+        "missing_hours": int(
+            len(
+                pd.date_range(df.datetime.min(), df.datetime.max(), freq="h").difference(
+                    df.datetime
+                )
+            )
+        ),
+        "was_sorted": bool(sorted_before),
+        "nonfinite": int((~np.isfinite(numeric.to_numpy())).sum()),
+        "nonpositive_load": int(df.nat_demand.le(0).sum()),
+        "load_below_200": int(df.nat_demand.lt(200).sum()),
+        "flag_changes_within_day": {
+            c: int(df.groupby(df.datetime.dt.date)[c].nunique().gt(1).sum())
+            for c in ("holiday", "school")
+        },
+        "holiday_disagreements": int(((df.Holiday_ID > 0) != (df.holiday == 1)).sum()),
+        "timezone": "Ajatemplid märgendamata; Panama kohalik aeg UTC−05:00 on allikakirjeldusel põhinev eeldus.",
+        "outlier_policy": "Ebatavalisi positiivseid koormusi ei eemaldata ega asendata.",
+    }
+    return df, audit
 
-    if df["datetime"].duplicated().any():
-        raise ValueError("Duplicate timestamps found")
-    if not df["datetime"].diff().dropna().eq(pd.Timedelta(hours=1)).all():
-        raise ValueError("Missing or irregular hourly timestamps found")
-    if df.isna().any().any():
-        raise ValueError("Missing values found; inspect them before deciding how to handle")
 
-    numeric = df.select_dtypes(include="number")
-    if not np.isfinite(numeric.to_numpy()).all():
-        raise ValueError("Infinite or non-finite numerical values found")
-    if not df["nat_demand"].gt(0).all():
-        raise ValueError("Non-positive load found; inspect before training")
-
+def validate_for_modeling(df, audit):
+    if (
+        any(
+            audit[k]
+            for k in (
+                "duplicate_timestamps",
+                "non_hourly_intervals",
+                "nonfinite",
+                "nonpositive_load",
+            )
+        )
+        or df.isna().any().any()
+    ):
+        raise ValueError(
+            "Andmekvaliteet ei võimalda vaikimisi modelleerimist; vaata quality.json. Andmeid ei parandata automaatselt."
+        )
+    for c in ("holiday", "school"):
+        if not df[c].isin([0, 1]).all():
+            raise ValueError(f"{c} ei ole binaarne.")
     return df
 
 
-def main() -> None:
-    df = prepare_data(RAW_PATH)
-    CLEANED_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(CLEANED_PATH, index=False, date_format="%Y-%m-%d %H:%M:%S")
-
-    min_idx = df["nat_demand"].idxmin()
-    print(f"Rows: {len(df):,}; columns: {len(df.columns)}")
-    print(f"Period: {df['datetime'].min()} to {df['datetime'].max()}")
-    print(f"Minimum load: {df.loc[min_idx, 'nat_demand']:.2f}, "
-        f"at {df.loc[min_idx, 'datetime']}"
-    )
-    print(f"Saved to: {CLEANED_PATH}")
+def prepare_data(path=RAW_PATH):
+    df, audit = load_and_audit(path)
+    return validate_for_modeling(df, audit)
 
 
 if __name__ == "__main__":
-    main()
+    data, quality = load_and_audit(RAW_PATH)
+    write_json(ROOT / "results/eda/quality.json", quality)
+    validate_for_modeling(data, quality)
+    print(f"Kontrollitud {len(data)} vaatlust; algandmeid ei muudetud.")

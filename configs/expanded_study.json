@@ -1,0 +1,32 @@
+{
+  "seed": 42,
+  "raw_path": "data/raw/continuous dataset.csv",
+  "screen_years": [2017, 2018],
+  "confirmation_year": 2019,
+  "retrospective_year": 2020,
+  "gap_hours": 24,
+  "workers": 2,
+  "feature_screen_model": "HistGBR",
+  "bootstrap_repeats": 2000,
+  "bootstrap_blocks": [24, 168],
+  "shap_sample": 256,
+  "models": {
+    "Ridge": [{"alpha": 1.0}, {"alpha": 100.0}],
+    "RandomForest": [
+      {"n_estimators": 120, "max_depth": 12, "min_samples_leaf": 3, "max_features": 1.0},
+      {"n_estimators": 120, "max_depth": null, "min_samples_leaf": 8, "max_features": 0.8}
+    ],
+    "ExtraTrees": [
+      {"n_estimators": 160, "max_depth": null, "min_samples_leaf": 3, "max_features": 1.0},
+      {"n_estimators": 160, "max_depth": null, "min_samples_leaf": 8, "max_features": 0.8}
+    ],
+    "GBR": [
+      {"n_estimators": 120, "learning_rate": 0.05, "max_depth": 3, "min_samples_leaf": 30},
+      {"n_estimators": 220, "learning_rate": 0.04, "max_depth": 3, "min_samples_leaf": 20}
+    ],
+    "HistGBR": [
+      {"max_iter": 180, "learning_rate": 0.06, "max_leaf_nodes": 15, "min_samples_leaf": 30, "l2_regularization": 1.0, "early_stopping": false},
+      {"max_iter": 260, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 40, "l2_regularization": 4.0, "early_stopping": false}
+    ]
+  }
+}
