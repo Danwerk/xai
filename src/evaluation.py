@@ -1,25 +1,135 @@
-"""Time-dependent paired uncertainty and diagnostic artifact audits."""
+"""Common forecast losses, correction harm and clock-aligned paired intervals."""
 
 import numpy as np
 import pandas as pd
 
+PRIMARY = "credit_feedback"
+METHODS = {
+    "base": "B0 Base GBR",
+    "direct": "B1 Direct HistGBR",
+    "residual": "B2 Standard residual correction",
+    "fixed": "B3 Fixed-weight correction",
+    "scalar_adaptive": "B4 Scalar least-squares adaptation (no XAI)",
+    "standalone_feedback": "B5 Standalone component feedback",
+    "credit_feedback": "B6 Proposed interaction-aware credit feedback",
+    "matched_scalar": "A1 One credit weight, matched settings",
+    "matched_standalone": "A2 No interaction credit, matched settings",
+    "no_context": "A3 No hour conditioning, matched settings",
+}
 
-def seasonal_error_scale(training_values, season=24):
-    """MASE nimetaja: sama tunni päevavahed ainult treeningperioodil."""
-    values = np.asarray(training_values, dtype=float)
-    if season < 1 or len(values) <= season:
-        raise ValueError("MASE jaoks on vaja hooajast pikemat treeningrida.")
 
-    scale = float(np.mean(np.abs(values[season:] - values[:-season])))
-    if not np.isfinite(scale) or scale <= 0:
-        raise ValueError("MASE võrdlusskaala peab olema lõplik ja positiivne.")
+def prediction_metrics(actual, predicted):
+    y, p = np.asarray(actual, float), np.asarray(predicted, float)
+    if y.ndim != 1 or not len(y) or p.shape != y.shape or not np.isfinite([y, p]).all():
+        raise ValueError("Metrics need aligned nonempty finite vectors.")
+    error = p - y
+    return {
+        "n": len(y),
+        "MAE": float(abs(error).mean()),
+        "RMSE": float(np.sqrt(np.mean(error**2))),
+        "bias": float(error.mean()),
+    }
 
-    return scale
+
+def forecast_metrics(actual, predicted, base, residual, tolerance=1e-9):
+    y, p, b, r = [np.asarray(x, float) for x in (actual, predicted, base, residual)]
+    if (
+        y.ndim != 1
+        or not len(y)
+        or any(x.shape != y.shape or not np.isfinite(x).all() for x in (y, p, b, r))
+    ):
+        raise ValueError("Metrics need aligned nonempty finite vectors.")
+    loss = abs(p - y)
+    result = prediction_metrics(y, p)
+    for name, reference in (("base", b), ("residual", r)):
+        reference_loss = abs(reference - y)
+        difference = loss - reference_loss
+        harmful = difference > tolerance
+        positive = np.where(harmful, difference, 0)
+        denom = reference_loss.mean()
+        result.update(
+            {
+                f"improvement_vs_{name}_pct": (
+                    float(100 * (1 - loss.mean() / denom)) if denom else None
+                ),
+                f"harmful_rate_vs_{name}": float(harmful.mean()),
+                # Unconditional mean positive loss increase, includes zero on other hours.
+                f"harmful_magnitude_vs_{name}": float(positive.mean()),
+                f"harmful_conditional_mean_vs_{name}": (
+                    float(difference[harmful].mean()) if harmful.any() else 0.0
+                ),
+            }
+        )
+    return result
 
 
-def accept_refinement(overall_change, scenario_change, scenario_count, min_count=40):
-    """Võta muudatus vastu, kui valikuperioodil paranevad mõlemad vead."""
-    return bool(scenario_count >= min_count and overall_change < 0 and scenario_change < 0)
+def scope_masks(frame, thresholds):
+    return {
+        "overall": np.ones(len(frame), dtype=bool),
+        "rapid_increase": frame.actual_ramp.ge(thresholds["increase"]).to_numpy(),
+        "rapid_decrease": frame.actual_ramp.le(thresholds["decrease"]).to_numpy(),
+    }
+
+
+def score_forecasts(frame, forecasts, thresholds, cfg, stage):
+    rows = []
+    y = frame.target_next_hour.to_numpy()
+    for name, p in forecasts.items():
+        for scope, mask in scope_masks(frame, thresholds).items():
+            if mask.any():
+                rows.append(
+                    {
+                        "method": name,
+                        "scope": scope,
+                        "stage": stage,
+                        "year": int(frame.target_time.dt.year.iloc[0]),
+                        **forecast_metrics(
+                            y[mask],
+                            np.asarray(p)[mask],
+                            np.asarray(forecasts["base"])[mask],
+                            np.asarray(forecasts["residual"])[mask],
+                            cfg["evaluation"]["harm_tolerance"],
+                        ),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def compare_forecasts(frame, forecasts, thresholds, cfg):
+    rows = []
+    masks = scope_masks(frame, thresholds)
+    # Credit/memory and parameter sensitivity are descriptive ablations, not
+    # extra hypotheses in the original baseline-comparison bootstrap family.
+    references = [name for name in METHODS if name != PRIMARY]
+    comparisons = len(references) * sum(mask.any() for mask in masks.values())
+    y = frame.target_next_hour.to_numpy()
+    for reference in references:
+        difference = abs(forecasts[PRIMARY] - y) - abs(forecasts[reference] - y)
+        for scope, mask in masks.items():
+            if not mask.any():
+                continue
+            for block in cfg["evaluation"]["bootstrap_blocks_hours"]:
+                if block > len(
+                    pd.date_range(frame.target_time.min(), frame.target_time.max(), freq="h")
+                ):
+                    raise ValueError("Evaluation period is shorter than a bootstrap block.")
+                rows.append(
+                    {
+                        "A": PRIMARY,
+                        "B": reference,
+                        "scope": scope,
+                        **clock_loss_interval(
+                            frame.target_time,
+                            difference,
+                            mask,
+                            block=block,
+                            repeats=cfg["evaluation"]["bootstrap_repeats"],
+                            seed=cfg["seed"],
+                            comparisons=comparisons,
+                        ),
+                    }
+                )
+    return pd.DataFrame(rows)
 
 
 def scenario_loss_interval(
@@ -72,113 +182,3 @@ def clock_loss_interval(times, difference, mask, **kwargs):
     values = pd.Series(np.asarray(difference, float), index=index).reindex(full, fill_value=0)
     eligible = pd.Series(np.asarray(mask, bool), index=index).reindex(full, fill_value=False)
     return scenario_loss_interval(values.to_numpy(), eligible.to_numpy(), **kwargs)
-
-
-def paired_block_bootstrap(actual, a, b, block=168, repeats=2000, seed=42):
-    """Circular block bootstrap of paired absolute-loss difference A minus B."""
-    y, a, b = [np.asarray(x, float) for x in (actual, a, b)]
-    if (
-        len(y) != len(a)
-        or len(y) != len(b)
-        or len(y) < 2
-        or block < 1
-        or block > len(y)
-        or repeats < 2
-    ):
-        raise ValueError("Sobimatud bootstrap-parameetrid või eri pikkusega paarid.")
-    interval = paired_intervals(y, a, b, block, repeats, seed)
-    return {
-        "MAE_difference_A_minus_B": interval["difference"],
-        "ci_low": interval["ci_low"],
-        "ci_high": interval["ci_high"],
-        "block_hours": block,
-        "repeats": repeats,
-        "interpretation": "Negatiivne erinevus soosib A-d; nulli hõlmav intervall ei toeta kindlat erinevust. Intervall on nominaalne ja eksploratiivne.",
-    }
-
-
-def audit_card(card):
-    reconstructed = card["base_value"] + sum(c["shap"] for c in card["shap_contributions"])
-    checks = {
-        "numeric_error_correct": bool(
-            np.isclose(card["prediction"] - card["actual"], card["error"])
-        ),
-        "absolute_error_correct": bool(np.isclose(abs(card["error"]), card["absolute_error"])),
-        "shap_additive": bool(np.isclose(reconstructed, card["prediction"], atol=1e-5)),
-        "shap_wording_correct": all(
-            c["interpretation"].startswith(
-                "Suurendab" if c["shap"] > 0 else ("Vähendab" if c["shap"] < 0 else "Panus")
-            )
-            for c in card["shap_contributions"]
-        ),
-        "history_available": all(
-            pd.Timestamp(h["target_time"]) <= pd.Timestamp(card["origin_time"])
-            for h in card["historical_cases"]
-        ),
-        "hypothesis_testable_or_abstained": (
-            card["diagnosis"]["hypothesis"] is None and card["diagnosis"]["experiment"] is None
-        )
-        or (
-            card["diagnosis"]["hypothesis"] is not None
-            and card["diagnosis"]["experiment"] is not None
-        ),
-        "traceable": len(card["evidence_sources"]) >= 3,
-        "prediction_not_error_caveat": "veapõhjust" in card["limitations"][0],
-    }
-    return {
-        "target_time": card["target_time"],
-        **checks,
-        "all_pass": all(checks.values()),
-        "scope": "Automaatne struktuuri- ja arvukontroll; inimese arusaadavust ega põhjuslikku korrektsust ei tõenda.",
-    }
-
-
-def mean_bias_interval(predictions, block=168, repeats=2000, seed=42):
-    """Bootstrap signed residual mean for scenario-conditional bias.
-
-    Re-sample the whole hourly mask with errors to preserve event clustering.
-    """
-    e = np.asarray(predictions, float)
-    rng = np.random.default_rng(seed)
-    n = len(e)
-    estimates = []
-    for _ in range(repeats):
-        starts = rng.integers(0, n, int(np.ceil(n / block)))
-        sample = e[((starts[:, None] + np.arange(block)) % n).ravel()[:n]]
-        if np.isfinite(sample).any():
-            estimates.append(float(np.nanmean(sample)))
-    if not estimates:
-        return {"bias_ci_low": None, "bias_ci_high": None}
-    low, high = np.quantile(estimates, [0.025, 0.975])
-    return {"bias_ci_low": float(low), "bias_ci_high": float(high)}
-
-
-def paired_intervals(y, a, b, block=168, repeats=2000, seed=42, comparisons=1):
-    """Nominal and Bonferroni intervals of paired MAE differences."""
-    y, a, b = [np.asarray(x, float) for x in (y, a, b)]
-    if (
-        not (len(y) == len(a) == len(b))
-        or not 1 <= block <= len(y)
-        or comparisons < 1
-        or repeats < 2
-    ):
-        raise ValueError("Paarisvõrdluse mõõtmed või parameetrid ei sobi.")
-    diff = np.abs(a - y) - np.abs(b - y)
-    rng = np.random.default_rng(seed)
-    n = len(y)
-    draws = np.empty(repeats)
-    for i in range(repeats):
-        starts = rng.integers(0, n, int(np.ceil(n / block)))
-        idx = ((starts[:, None] + np.arange(block)) % n).ravel()[:n]
-        draws[i] = diff[idx].mean()
-    low, high = np.quantile(draws, [0.025, 0.975])
-    adjusted_low, adjusted_high = np.quantile(draws, [0.025 / comparisons, 1 - 0.025 / comparisons])
-    return {
-        "difference": float(diff.mean()),
-        "ci_low": float(low),
-        "ci_high": float(high),
-        "adjusted_low": float(adjusted_low),
-        "adjusted_high": float(adjusted_high),
-        "block_hours": block,
-        "family_comparisons": comparisons,
-    }

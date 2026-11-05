@@ -1,13 +1,9 @@
-"""Validate source observations without deleting unusual values."""
+"""Audit measured load; never synthesize or silently repair source data."""
 
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-from .common import ROOT, write_json
-
-RAW_PATH = ROOT / "data/raw/continuous dataset.csv"
 WEATHER = [f"{v}_{c}" for c in ("toc", "san", "dav") for v in ("T2M", "QV2M", "TQL", "W2M")]
 
 
@@ -84,15 +80,3 @@ def validate_for_modeling(df, audit):
         if not df[c].isin([0, 1]).all():
             raise ValueError(f"{c} ei ole binaarne.")
     return df
-
-
-def prepare_data(path=RAW_PATH):
-    df, audit = load_and_audit(path)
-    return validate_for_modeling(df, audit)
-
-
-if __name__ == "__main__":
-    data, quality = load_and_audit(RAW_PATH)
-    write_json(ROOT / "results/eda/quality.json", quality)
-    validate_for_modeling(data, quality)
-    print(f"Kontrollitud {len(data)} vaatlust; algandmeid ei muudetud.")

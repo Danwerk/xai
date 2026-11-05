@@ -1,9 +1,3 @@
-[project]
-name = "xai-load-forecasting"
-version = "0.1.0"
-requires-python = ">=3.11"
-description = "Human-centered electricity load forecast error diagnosis"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -11,4 +5,3 @@ pythonpath = ["."]
 [tool.black]
 line-length = 100
 target-version = ["py311"]
-extend-exclude = "results|\\.venv"

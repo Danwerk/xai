@@ -1,13 +1,13 @@
-"""Shared artifact handling; CSV is the only tabular storage format."""
+"""Small shared helpers for configuration and reproducible CSV artifacts."""
 
 import hashlib
 import json
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / "configs/experiment.json"
 
 
 def write_json(path, value):
@@ -49,34 +49,36 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def manifest_core_sha256(path):
-    """Identity of original results, unaffected by the two appended XAI studies."""
-    value = read_json(path)
-    for key in ("attribution_refinement", "attribution_transfer"):
-        value.pop(key, None)
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+def read_config():
+    return read_json(CONFIG_PATH)
 
 
-def read_config(path=None):
-    return json.loads(Path(path or ROOT / "configs/experiment.json").read_text(encoding="utf-8"))
+def config_reference(cfg):
+    """Hash parsed settings, so JSON formatting alone does not change a run."""
+    content = json.dumps(cfg, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return {
+        "path": "configs/experiment.json",
+        "sha256": hashlib.sha256(content.encode()).hexdigest(),
+    }
+
+
+def read_run_config(record):
+    """Use the single configuration; reject results made with different settings."""
+    cfg = read_config()
+    if record.get("config_ref") != config_reference(cfg):
+        raise ValueError("Run settings differ from configs/experiment.json; reproduce the run.")
+    return cfg
 
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def latest_run(pointer="latest_run.json"):
-    """Leia valmis katse; kontrollsumma seob osuti õige tulemusega."""
-    path = ROOT / "results" / pointer
-    if not path.exists():
-        raise FileNotFoundError(
-            "Kohalikud katsetulemused puuduvad. Käivita uuring README järjekorras; tulemusi GitHubis kaasa ei anta."
-        )
-    link = read_json(path)
-    folder = Path(link["path"])
-    if sha256(folder / "manifest.json") != link["manifest_sha256"]:
-        raise ValueError(f"Katse kontrollsumma ei vasta osutile: {pointer}")
+def latest_run():
+    pointer = read_json(ROOT / "results/latest_thesis_run.json")
+    folder = ROOT / pointer["path"]
+    if sha256(folder / "manifest.json") != pointer["manifest_sha256"]:
+        raise ValueError("Run manifest does not match its pointer.")
     if read_json(folder / "manifest.json")["status"] != "complete":
-        raise ValueError(f"Katse pole lõpetatud: {folder}")
+        raise ValueError("The selected run is incomplete.")
     return folder

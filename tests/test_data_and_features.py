@@ -3,173 +3,111 @@ import pandas as pd
 import pytest
 
 from src.data_preprocessing import load_and_audit, validate_for_modeling
-from src.feature_engineering import build_features, split_features, load_run_features
-from src.common import ROOT, sha256, write_json
+from src.feature_engineering import (
+    build_features,
+    feature_columns,
+    known_error_features,
+    load_estonia_hourly,
+)
 
 
-@pytest.mark.parametrize("expanded", [False, True])
-def test_run_features_rebuilt_exactly_without_intermediate_files(
-    hourly_data, cfg, tmp_path, expanded
-):
-    from src.expanded_features import build_expanded_features
-
-    # A full four-week history is needed by the expanded feature set.
-    data = pd.concat([hourly_data] * 3, ignore_index=True)
-    data["datetime"] = pd.date_range("2017-01-01", periods=len(data), freq="h")
-    raw_path = tmp_path / "raw.csv"
-    data.to_csv(raw_path, index=False)
-    raw, _ = load_and_audit(raw_path)
-    saved_config = {**cfg, "raw_path": str(raw_path), "weather_delay_hours": 26}
-    modules = [
-        "src/data_preprocessing.py",
-        "src/feature_engineering.py",
-        "src/expanded_features.py",
-    ]
-    write_json(
-        tmp_path / "manifest.json",
-        {
-            "raw_sha256": sha256(raw_path),
-            "source_sha256": {
-                str((ROOT / name).relative_to(ROOT)): sha256(ROOT / name) for name in modules
-            },
-        },
-    )
-    config_name = "original_experiment" if expanded else "experiment"
-    write_json(tmp_path / f"configs/{config_name}.json", saved_config)
-    if expanded:
-        write_json(tmp_path / "configs/expanded_study.json", {"raw_path": str(raw_path)})
-    existing = set(tmp_path.rglob("*"))
-    expected = (
-        build_expanded_features(raw, saved_config)[0]
-        if expanded
-        else build_features(raw, saved_config)
-    )
-    restored = load_run_features(tmp_path, expanded=expanded)
-    assert len(restored) > 0
-    pd.testing.assert_frame_equal(restored, expected, check_exact=True)
-    assert set(tmp_path.rglob("*")) == existing
-
-    raw_path.write_text(raw_path.read_text() + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Algandmed"):
-        load_run_features(tmp_path, expanded=expanded)
-
-
-def test_audit_preserves_positive_outlier_and_sorts(hourly_data, tmp_path):
-    hourly_data.loc[10, "nat_demand"] = 1
-    path = tmp_path / "source.csv"
-    hourly_data.iloc[::-1].to_csv(path, index=False)
-    d, audit = load_and_audit(path)
-    validate_for_modeling(d, audit)
-    assert len(d) == 400 and d.nat_demand.min() == 1
-    assert audit["was_sorted"] is False
-    assert audit["non_hourly_intervals"] == 0
-
-
-@pytest.mark.parametrize("problem", ["duplicate", "gap", "nan", "inf", "negative", "badflag"])
-def test_invalid_data_fails_without_repair(hourly_data, tmp_path, problem):
-    d = hourly_data.copy()
+@pytest.mark.parametrize("problem", ["duplicate", "gap", "nan", "inf", "negative", "flag"])
+def test_invalid_sources_fail_without_repair(hourly_data, tmp_path, problem):
+    data = hourly_data.copy()
     if problem == "duplicate":
-        d = pd.concat([d, d.iloc[[0]]])
+        data = pd.concat([data, data.iloc[[0]]])
     elif problem == "gap":
-        d = d.drop(2)
+        data = data.drop(2)
     else:
         col, value = {
             "nan": ("nat_demand", np.nan),
             "inf": ("T2M_toc", np.inf),
             "negative": ("nat_demand", -1),
-            "badflag": ("holiday", 2),
+            "flag": ("school", 4),
         }[problem]
-        d.loc[2, col] = value
-    path = tmp_path / "invalid.csv"
-    d.to_csv(path, index=False)
-    data, audit = load_and_audit(path)
+        data.loc[2, col] = value
+    path = tmp_path / "raw.csv"
+    data.to_csv(path, index=False)
+    read, quality = load_and_audit(path)
     with pytest.raises(ValueError):
-        validate_for_modeling(data, audit)
+        validate_for_modeling(read, quality)
 
 
-def test_missing_file_does_not_generate_data(tmp_path):
-    path = tmp_path / "absent.csv"
+def test_positive_outliers_preserved_and_missing_source_fails(hourly_data, tmp_path):
+    hourly_data.loc[10, "nat_demand"] = 1
+    path = tmp_path / "raw.csv"
+    hourly_data.iloc[::-1].to_csv(path, index=False)
+    frame, quality = load_and_audit(path)
+    assert validate_for_modeling(frame, quality).nat_demand.min() == 1
+    assert not quality["was_sorted"]
     with pytest.raises(FileNotFoundError):
-        load_and_audit(path)
-    assert not path.exists()
+        load_and_audit(tmp_path / "missing.csv")
 
 
-def test_exact_origin_target_and_seasonal_lags(hourly_data, cfg):
-    f = build_features(hourly_data, cfg)
-    row = f.iloc[0]
-    i = int(np.flatnonzero(hourly_data.datetime == row.origin_time)[0])
-    y = hourly_data.nat_demand
-    assert row.target_next_hour == y[i + 1]
-    assert row.load_now == y[i]
-    assert row.load_day == y[i - 23]
-    assert row.load_week == y[i - 167]
-    assert row.load_lag_2 == y[i - 2]
-    assert row.target_time == row.origin_time + pd.Timedelta(hours=1)
-    assert row.hour == row.target_time.hour
-    assert row.dayofweek == row.target_time.dayofweek
-
-
-def test_rolling_and_weather_delay(hourly_data, cfg):
-    f = build_features(hourly_data, cfg)
-    row = f.iloc[0]
-    i = int(np.flatnonzero(hourly_data.datetime == row.origin_time)[0])
-    assert row.load_mean_6 == hourly_data.nat_demand.iloc[i - 5 : i + 1].mean()
-    assert row.load_std_24 == pytest.approx(hourly_data.nat_demand.iloc[i - 23 : i + 1].std())
-    assert row.load_ramp_1h == 1
-    assert row.temperature == pytest.approx(hourly_data.T2M_toc[i - 24])
-
-
-def test_future_mutation_cannot_change_any_input(hourly_data, cfg):
-    origin = hourly_data.datetime.iloc[250]
+def test_features_have_exact_forecast_alignment_and_no_future_inputs(hourly_data, cfg):
     before = build_features(hourly_data, cfg).set_index("origin_time")
+    origin = before.index[40]
+    i = hourly_data.index[hourly_data.datetime.eq(origin)][0]
+    row = before.loc[origin]
+    assert row.target_next_hour == hourly_data.nat_demand[i + 1]
+    assert row.load_day == hourly_data.nat_demand[i - 23]
+    assert row.load_week == hourly_data.nat_demand[i - 167]
+    assert row.load_std_24 == pytest.approx(hourly_data.nat_demand.iloc[i - 23 : i + 1].std())
+    assert row.temperature == pytest.approx(hourly_data.T2M_toc[i - 24])
     changed = hourly_data.copy()
-    future = changed.datetime > origin
-    for c in changed.columns.difference(["datetime"]):
-        changed.loc[future, c] = 9999
+    changed.loc[changed.datetime > origin, changed.columns.difference(["datetime"])] = 10000
     after = build_features(changed, cfg).set_index("origin_time")
-    inputs = cfg["baseline_features"] + [
-        c for cols in cfg["candidate_groups"].values() for c in cols
-    ]
-    pd.testing.assert_series_equal(before.loc[origin, inputs], after.loc[origin, inputs])
+    _, columns = feature_columns("panama")
+    pd.testing.assert_series_equal(before.loc[origin, columns], after.loc[origin, columns])
     assert before.loc[origin, "target_next_hour"] != after.loc[origin, "target_next_hour"]
+    assert not {"actual_ramp", "target_next_hour", "hour"}.intersection(columns)
 
 
-def test_calendar_date_boundary_does_not_read_tomorrow(hourly_data, cfg):
-    d = hourly_data.copy()
-    d.loc[d.datetime >= "2017-12-30", ["holiday", "school"]] = [1, 0]
-    f = build_features(d, cfg).set_index("origin_time")
-    assert f.loc[pd.Timestamp("2017-12-29 23:00"), "holiday_known"] == 0
-    assert f.loc[pd.Timestamp("2017-12-30 01:00"), "holiday_known"] == 1
-    assert f.loc[pd.Timestamp("2017-12-29 23:00"), "hour"] == 0
+def test_calendar_boundary_and_required_history_only(hourly_data, cfg):
+    hourly_data.loc[hourly_data.datetime >= "2017-12-10", "holiday"] = 1
+    frame = build_features(hourly_data, cfg).set_index("origin_time")
+    assert frame.loc[pd.Timestamp("2017-12-09 23:00"), "holiday_known"] == 0
+    assert frame.loc[pd.Timestamp("2017-12-10 00:00"), "holiday_known"] == 1
+    assert frame.index.min() == hourly_data.datetime.iloc[167]
 
 
-def test_configurable_load_latency(hourly_data, cfg):
-    cfg["load_delay_hours"] = 24
-    row = build_features(hourly_data, cfg).iloc[0]
-    i = int(np.flatnonzero(hourly_data.datetime == row.origin_time)[0])
-    assert row.load_now == hourly_data.nat_demand[i - 24]
-    assert row.load_day == hourly_data.nat_demand[i - 47]
-
-
-def test_split_uses_target_timestamp(cfg):
-    f = pd.DataFrame(
+def test_error_memory_uses_only_available_timestamped_targets():
+    target = pd.date_range("2018-01-01", periods=200, freq="h")
+    frame = pd.DataFrame(
         {
-            "origin_time": pd.to_datetime(
-                ["2017-12-31 22:00", "2017-12-31 23:00", "2018-12-31 23:00", "2019-12-31 23:00"]
-            )
+            "target_time": target,
+            "origin_time": target - pd.Timedelta(hours=1),
+            "base_prediction": 0.0,
+            "target_next_hour": np.arange(200.0),
         }
     )
-    f["target_time"] = f.origin_time + pd.Timedelta(hours=1)
-    s = split_features(f, cfg)
-    assert len(s["train"]) == 1
-    assert s["diagnosis"].target_time.iloc[0] == pd.Timestamp("2018-01-01")
-    assert s["test"].target_time.iloc[0] == pd.Timestamp("2020-01-01")
+    before = known_error_features(frame)
+    frame.loc[100:, "target_next_hour"] = 1e9
+    after = known_error_features(frame)
+    pd.testing.assert_frame_equal(before.iloc[:101], after.iloc[:101])
+    assert before.loc[100, "known_error_24"] == 76
+    assert after.loc[101, "known_error_1"] == 1e9
+    gap = frame.iloc[[0, 2]].reset_index(drop=True)
+    assert known_error_features(gap).loc[1, "known_error_1"] == 0
 
 
-@pytest.mark.parametrize(
-    "field", ["target_next_hour", "actual_ramp", "actual_temperature", "holiday_retrospective"]
-)
-def test_config_cannot_promote_retrospective_labels_to_features(hourly_data, cfg, field):
-    cfg["baseline_features"].append(field)
-    with pytest.raises(ValueError, match="tagasivaatelisi"):
+def test_estonia_interval_labels_missing_quarters_and_dst_calendar(tmp_path, cfg):
+    times = pd.date_range("2024-03-20", periods=5000, freq="15min", tz="UTC")
+    raw = pd.DataFrame({"datetime": times, "consumption": 1000 + np.arange(5000) // 4})
+    raw = raw.drop(index=4001)
+    path = tmp_path / "estonia.csv"
+    raw.to_csv(path, index=False)
+    hourly, quality = load_estonia_hourly(path, 2024)
+    assert quality["imputed_values"] == 0 and quality["missing_hourly_load"] == 1
+    row = hourly.set_index("datetime").loc[pd.Timestamp("2024-03-20 01:00")]
+    assert row.nat_demand == 1000
+    frame = build_features(hourly, cfg, "estonia").set_index("origin_time")
+    assert frame.loc[pd.Timestamp("2024-03-31 00:00"), "hour"] == 4
+    assert frame.loc[pd.Timestamp("2024-03-30 00:00"), "hour"] == 3
+    assert "temperature" not in frame and "holiday_known" not in frame
+
+
+def test_load_latency_cannot_silently_break_feedback(hourly_data, cfg):
+    cfg["load_delay_hours"] = 1
+    with pytest.raises(ValueError):
         build_features(hourly_data, cfg)

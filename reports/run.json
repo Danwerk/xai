@@ -1,0 +1,341 @@
+{
+  "run": "20261105T181101517475Z",
+  "manifest_sha256": "7e9eb5424163deaa4c227157465a5d43749c4efef58f259e1b925e33b3276b98",
+  "protocol": "realised-credit-v2",
+  "config_ref": {
+    "path": "configs/experiment.json",
+    "sha256": "d7276d6f509e762fa5096e73e815e0d0ab76fd1b87eb20dc520694a4795c9120"
+  },
+  "selection": {
+    "status": "frozen",
+    "selected_utc": "2026-11-05T18:11:39.314757+00:00",
+    "development_raw_sha256": "f41b0204abd18a44e90a456f8951068b6439fecda924cac6b488bbee0acebbc1",
+    "development_years": [
+      2018,
+      2019
+    ],
+    "choices": {
+      "fixed": {
+        "candidate": "identity",
+        "setting": null,
+        "development_ratio": 1.0
+      },
+      "scalar_adaptive": {
+        "candidate": "identity",
+        "setting": null,
+        "development_ratio": 1.0
+      },
+      "standalone_feedback": {
+        "candidate": "standalone_feedback_w672_h1_s1.0",
+        "setting": {
+          "window_hours": 672,
+          "by_hour": true,
+          "strength": 1.0
+        },
+        "development_ratio": 0.9912647585227873
+      },
+      "credit_feedback": {
+        "candidate": "credit_feedback_w672_h1_s1.0",
+        "setting": {
+          "window_hours": 672,
+          "by_hour": true,
+          "strength": 1.0
+        },
+        "development_ratio": 0.9900275414944714
+      }
+    },
+    "decay": {
+      "candidate": "decay_672",
+      "half_life_hours": 672,
+      "development_ratio": 0.9898231658031404,
+      "memory": "exponential"
+    },
+    "selection_rule": "minimum mean scope/year MAE ratio; each ratio <= declared maximum; full correction fallback; identity wins exact ties"
+  },
+  "source_sha256": {
+    "src/common.py": "36fabe70b13acd8886d18a2bccaa115f55d386d09c16f9a397abc738550759c8",
+    "src/data_preprocessing.py": "677a576e223012b9049f4689d8fe31100d68f180e77dafdbb0a209d0b616b729",
+    "src/feature_engineering.py": "628fb58e59369bdea38f859dec29eeea9399d9cee39256f3af40f63a2a68d332",
+    "src/models.py": "e69d8b440f87e2a1049d95aac52e9d2c09d9c6a980ed96d45eefb467f45e77c1",
+    "src/correction.py": "475917bed73d9647c7690816e23ee7b7d2f98a5bca417db776d7e909f25c9bb4",
+    "src/shap_explainer.py": "4f5976907a2601cf489c0b147cf839550517123ccba99d886960c19275f4c8ce",
+    "src/evaluation.py": "e0ec984b3a7cec265c7535236d7e6167677b2dcb41c09d0f61c984ccf5bf2743",
+    "src/study.py": "2888efb6ea3236c76f8990238b9c9f87eab119cb65dfc9ff3f3cea65da82b291",
+    "run_pipeline.py": "0d9dcc3f0b38e91ceed0ac893f62420b746a07583fa80b11cc8e30f05de188c0",
+    "requirements.txt": "1595fa52cd00bf90dde4877f1990bf4db75b419b478ee67ee8ab0423339da659"
+  },
+  "git": {
+    "revision": "12206401e2300808616acba584664a1b7980213a",
+    "dirty": true
+  },
+  "datasets": {
+    "panama": {
+      "raw_sha256": "f41b0204abd18a44e90a456f8951068b6439fecda924cac6b488bbee0acebbc1",
+      "thresholds": {
+        "increase": 122.75515999999992,
+        "decrease": -76.47940000000003
+      },
+      "quality": {
+        "rows": 48048,
+        "columns": 17,
+        "first": "2015-01-03 01:00:00",
+        "last": "2020-06-27 00:00:00",
+        "original_dtypes": {
+          "datetime": "datetime64[us]",
+          "nat_demand": "float64",
+          "T2M_toc": "float64",
+          "QV2M_toc": "float64",
+          "TQL_toc": "float64",
+          "W2M_toc": "float64",
+          "T2M_san": "float64",
+          "QV2M_san": "float64",
+          "TQL_san": "float64",
+          "W2M_san": "float64",
+          "T2M_dav": "float64",
+          "QV2M_dav": "float64",
+          "TQL_dav": "float64",
+          "W2M_dav": "float64",
+          "Holiday_ID": "int64",
+          "holiday": "int64",
+          "school": "int64"
+        },
+        "missing_by_column": {
+          "datetime": 0,
+          "nat_demand": 0,
+          "T2M_toc": 0,
+          "QV2M_toc": 0,
+          "TQL_toc": 0,
+          "W2M_toc": 0,
+          "T2M_san": 0,
+          "QV2M_san": 0,
+          "TQL_san": 0,
+          "W2M_san": 0,
+          "T2M_dav": 0,
+          "QV2M_dav": 0,
+          "TQL_dav": 0,
+          "W2M_dav": 0,
+          "Holiday_ID": 0,
+          "holiday": 0,
+          "school": 0
+        },
+        "duplicate_rows": 0,
+        "duplicate_timestamps": 0,
+        "non_hourly_intervals": 0,
+        "missing_hours": 0,
+        "was_sorted": true,
+        "nonfinite": 0,
+        "nonpositive_load": 0,
+        "load_below_200": 2,
+        "flag_changes_within_day": {
+          "holiday": 0,
+          "school": 0
+        },
+        "holiday_disagreements": 0,
+        "timezone": "Ajatemplid märgendamata; Panama kohalik aeg UTC−05:00 on allikakirjeldusel põhinev eeldus.",
+        "outlier_policy": "Ebatavalisi positiivseid koormusi ei eemaldata ega asendata.",
+        "valid_forecasts": 47880,
+        "test_forecasts": 4273,
+        "calendar_test_hours": 8784,
+        "unscored_test_hours": 4511,
+        "feature_policy": "fixed required inputs only; common mask for every method"
+      },
+      "base_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend",
+        "temperature",
+        "humidity",
+        "wind"
+      ],
+      "correction_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend",
+        "temperature",
+        "humidity",
+        "wind",
+        "load_ramp_1h",
+        "load_ramp_3h",
+        "load_mean_6",
+        "load_std_6",
+        "load_mean_24",
+        "load_std_24",
+        "load_lag_2",
+        "load_lag_3",
+        "holiday_known",
+        "school_known"
+      ],
+      "selection_frozen_utc": "2026-11-05T18:11:39.314757+00:00",
+      "evaluation_status": "complete",
+      "evaluated_utc": "2026-11-05T18:12:04.491155+00:00",
+      "training_target_max": "2019-12-31 23:00:00",
+      "training_n": 35064,
+      "residual_and_direct_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend",
+        "temperature",
+        "humidity",
+        "wind",
+        "load_ramp_1h",
+        "load_ramp_3h",
+        "load_mean_6",
+        "load_std_6",
+        "load_mean_24",
+        "load_std_24",
+        "load_lag_2",
+        "load_lag_3",
+        "holiday_known",
+        "school_known",
+        "base_prediction",
+        "known_error_1",
+        "known_error_24",
+        "known_error_168",
+        "known_error_mean24",
+        "known_error_mean168"
+      ],
+      "component_groups": [
+        "recent_load",
+        "seasonal_load",
+        "clock",
+        "calendar",
+        "weather",
+        "dynamics",
+        "forecast_anchor",
+        "error_memory",
+        "offset"
+      ],
+      "test_first": "2020-01-01 00:00:00",
+      "test_last": "2020-06-27 00:00:00"
+    },
+    "estonia": {
+      "raw_sha256": "7be0739e391abf54a874e3c605bc2b440f2f1c29d4d54a32e6cf42f183804fac",
+      "thresholds": {
+        "increase": 101.99673999999999,
+        "decrease": -70.72887999999998
+      },
+      "quality": {
+        "source_rows": 61361,
+        "hourly_intervals": 61368,
+        "missing_hourly_load": 12,
+        "nonpositive_load_unavailable": 3,
+        "imputed_values": 0,
+        "hourly_label": "right endpoint of completed interval",
+        "split_timezone": "UTC",
+        "calendar_timezone": "Europe/Tallinn",
+        "valid_forecasts": 60888,
+        "test_forecasts": 8654,
+        "calendar_test_hours": 8784,
+        "unscored_test_hours": 130,
+        "feature_policy": "fixed required inputs only; common mask for every method"
+      },
+      "base_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend"
+      ],
+      "correction_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend",
+        "load_ramp_1h",
+        "load_ramp_3h",
+        "load_mean_6",
+        "load_std_6",
+        "load_mean_24",
+        "load_std_24",
+        "load_lag_2",
+        "load_lag_3"
+      ],
+      "selection_frozen_utc": "2026-11-05T18:11:39.314757+00:00",
+      "evaluation_status": "complete",
+      "evaluated_utc": "2026-11-05T18:12:52.298564+00:00",
+      "training_target_max": "2023-12-31 23:00:00",
+      "training_n": 43720,
+      "residual_and_direct_features": [
+        "load_now",
+        "load_day",
+        "load_week",
+        "hour_sin",
+        "hour_cos",
+        "dow_sin",
+        "dow_cos",
+        "month_sin",
+        "month_cos",
+        "weekend",
+        "load_ramp_1h",
+        "load_ramp_3h",
+        "load_mean_6",
+        "load_std_6",
+        "load_mean_24",
+        "load_std_24",
+        "load_lag_2",
+        "load_lag_3",
+        "base_prediction",
+        "known_error_1",
+        "known_error_24",
+        "known_error_168",
+        "known_error_mean24",
+        "known_error_mean168"
+      ],
+      "component_groups": [
+        "recent_load",
+        "seasonal_load",
+        "clock",
+        "calendar",
+        "dynamics",
+        "forecast_anchor",
+        "error_memory",
+        "offset"
+      ],
+      "test_first": "2024-01-01 00:00:00",
+      "test_last": "2024-12-31 23:00:00"
+    }
+  },
+  "packages": {
+    "numpy": "2.4.6",
+    "pandas": "3.0.6",
+    "scikit-learn": "1.9.1",
+    "shap": "0.51.0",
+    "scipy": "1.17.1",
+    "matplotlib": "3.11.2",
+    "threadpoolctl": "3.7.0"
+  },
+  "python": "3.11.2 (tags/v3.11.2:878ead1, Feb  7 2023, 16:38:35) [MSC v.1934 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26200-SP0"
+}

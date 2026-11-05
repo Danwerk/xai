@@ -1,5 +1,3 @@
-"""Synthetic arithmetic fixtures only; never scientific result data."""
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -14,17 +12,18 @@ def cfg():
 
 @pytest.fixture
 def hourly_data():
-    n = 400
-    d = pd.DataFrame(
+    n = 1100
+    t = np.arange(n)
+    frame = pd.DataFrame(
         {
-            "datetime": pd.date_range("2017-12-20", periods=n, freq="h"),
-            "nat_demand": np.arange(n, dtype=float) + 500,
-            "holiday": 0,
-            "school": 1,
-            "Holiday_ID": 0,
+            "datetime": pd.date_range("2017-11-25", periods=n, freq="h"),
+            "nat_demand": 500 + t * 0.05 + 40 * np.sin(2 * np.pi * t / 24),
+            "holiday": np.zeros(n),
+            "school": np.ones(n),
+            "Holiday_ID": np.zeros(n),
         }
     )
     for city in ("toc", "san", "dav"):
-        for name, value in (("T2M", 25), ("QV2M", 0.015), ("TQL", 0.01), ("W2M", 3)):
-            d[f"{name}_{city}"] = value + np.arange(n) / 1000
-    return d
+        for variable, value in (("T2M", 26.0), ("QV2M", 0.01), ("TQL", 0.2), ("W2M", 3.0)):
+            frame[f"{variable}_{city}"] = value + 0.001 * t
+    return frame

@@ -1,50 +1,84 @@
 {
+  "protocol": "realised-credit-v2",
   "seed": 42,
-  "raw_path": "data/raw/continuous dataset.csv",
+  "workers": 2,
   "weather_delay_hours": 24,
   "load_delay_hours": 0,
-  "train_end": "2018-01-01",
-  "diagnosis_end": "2019-01-01",
-  "selection_end": "2020-01-01",
-  "min_scenario_n": 40,
-  "gbr": {"n_estimators": 120, "learning_rate": 0.05, "max_depth": 3, "min_samples_leaf": 30, "loss": "squared_error", "random_state": 42},
-  "baseline_features": ["load_now", "load_day", "load_week", "hour_sin", "hour_cos", "dow_sin", "dow_cos", "month_sin", "month_cos", "weekend", "temperature", "humidity", "wind"],
-  "candidate_groups": {
-    "temperature_nonlinear": ["temperature_sq", "cooling_proxy"],
-    "temperature_time": ["temperature_hour_sin", "temperature_hour_cos"],
-    "weather_history": ["temperature_mean_24", "temperature_change_24"],
-    "ramp": ["load_ramp_1h", "load_ramp_3h"],
-    "rolling": ["load_mean_6", "load_std_6", "load_mean_24", "load_std_24"],
-    "calendar_history": ["load_lag_2", "load_lag_3", "holiday_known", "school_known"]
+  "base_model": {
+    "n_estimators": 120,
+    "learning_rate": 0.05,
+    "max_depth": 3,
+    "min_samples_leaf": 30,
+    "loss": "squared_error"
   },
-  "case_studies": {
-    "temperature": ["temperature_nonlinear", "temperature_time", "weather_history"],
-    "rapid_change": ["ramp", "rolling", "calendar_history"]
+  "residual_model": {
+    "max_iter": 180,
+    "learning_rate": 0.06,
+    "max_leaf_nodes": 15,
+    "min_samples_leaf": 30,
+    "l2_regularization": 1.0,
+    "early_stopping": false
   },
-  "budget_per_case": 2,
-  "specialist_quantile": 0.95,
-  "specialist": {
-    "feature_groups": ["ramp", "rolling", "calendar_history"],
-    "blend_weights": [0.25, 0.5, 1.0],
-    "growth_weight": 4.0,
-    "model": {"max_iter": 180, "learning_rate": 0.06, "max_leaf_nodes": 15, "min_samples_leaf": 30, "l2_regularization": 1.0, "early_stopping": false}
+  "datasets": {
+    "panama": {
+      "path": "data/raw/continuous dataset.csv",
+      "development_years": [
+        2018,
+        2019
+      ],
+      "test_year": 2020,
+      "threshold_end": "2018-01-01"
+    },
+    "estonia": {
+      "path": "data/raw/estonia_load.csv",
+      "development_years": [],
+      "test_year": 2024,
+      "threshold_end": "2021-01-01"
+    }
   },
-  "shap_sample": 1200,
-  "pfi_sample": 1500,
-  "pfi_repeats": 5,
-  "bootstrap_repeats": 2000,
-  "bootstrap_blocks": [24, 168],
-  "stability_seeds": [17, 42, 83],
-  "card_count": 12,
-  "attribution_refinement": {
-    "alphas": [1.0, 100.0, 10000.0],
-    "harmonics": [0, 2, 4],
-    "feedback_windows": [168, 672],
-    "feedback_strengths": [0.25, 1.0],
-    "selection_years": [2018, 2019],
-    "test_year": 2020,
+  "selection": {
+    "fixed_weights": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "feedback_windows_hours": [
+      168,
+      672
+    ],
+    "feedback_strengths": [
+      0.25,
+      1.0
+    ],
+    "max_scope_mae_ratio": 1.05
+  },
+  "feedback": {
+    "min_history_points": 3,
+    "warmup_hours": 72
+  },
+  "preliminary_models": {
+    "ridge": {"alpha": 1.0},
+    "random_forest": {
+      "n_estimators": 120,
+      "max_depth": 12,
+      "min_samples_leaf": 30,
+      "max_features": 1.0
+    }
+  },
+  "feedback_checks": {
+    "half_lives_hours": [24, 168, 672],
+    "windows_hours": [168, 336, 672],
+    "strengths": [0.25, 0.5, 1.0]
+  },
+  "evaluation": {
+    "bootstrap_blocks_hours": [
+      24,
+      168
+    ],
+    "primary_block_hours": 168,
     "bootstrap_repeats": 5000,
-    "transfer_path": "data/raw/estonia_load.csv",
-    "transfer_test_year": 2024
+    "harm_tolerance": 1e-09
   }
 }
