@@ -9,6 +9,7 @@ from sklearn.ensemble import (
 from sklearn.linear_model import Ridge
 
 from src.feature_engineering import feature_columns
+from src.models import make_base_model
 from src.compare_forecasting_models import compare_models, development_years, make_models
 
 
@@ -82,6 +83,9 @@ def test_four_fixed_families_reuse_existing_model_settings(cfg):
         assert all(models[name].get_params()[k] == v for k, v in cfg[key].items())
     assert models["HistGBR"].early_stopping is False
     assert models["RandomForest"].random_state == cfg["seed"]
+    for family, name in (("gbr", "GBR"), ("histgbr", "HistGBR")):
+        cfg["base_model_family"] = family
+        assert make_base_model(cfg).get_params() == models[name].get_params()
 
 
 def test_preliminary_protocol_rejects_test_year_and_random_early_stopping(cfg):

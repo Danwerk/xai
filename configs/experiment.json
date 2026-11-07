@@ -1,9 +1,9 @@
 {
-  "protocol": "realised-credit-v2",
   "seed": 42,
   "workers": 2,
   "weather_delay_hours": 24,
   "load_delay_hours": 0,
+  "base_model_family": "histgbr",
   "base_model": {
     "n_estimators": 120,
     "learning_rate": 0.05,

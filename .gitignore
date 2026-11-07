@@ -18,7 +18,3 @@ data/raw/*.csv
 .jupyter/
 .pytest_cache/
 
-# Kõik katseväljundid arvutatakse kohapeal; GitHubis säilivad reports/ koondid
-/results/
-/data/processed/
-/data/splits/

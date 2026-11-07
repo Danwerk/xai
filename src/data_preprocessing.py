@@ -74,7 +74,7 @@ def validate_for_modeling(df, audit):
         or df.isna().any().any()
     ):
         raise ValueError(
-            "Andmekvaliteet ei võimalda vaikimisi modelleerimist; vaata quality.json. Andmeid ei parandata automaatselt."
+            "Andmekvaliteet ei võimalda modelleerimist; vaata tagastatud auditit. Andmeid ei parandata automaatselt."
         )
     for c in ("holiday", "school"):
         if not df[c].isin([0, 1]).all():

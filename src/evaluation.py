@@ -5,13 +5,14 @@ import pandas as pd
 
 PRIMARY = "credit_feedback"
 METHODS = {
-    "base": "B0 Base GBR",
+    "base": "B0 Base forecast",
     "direct": "B1 Direct HistGBR",
     "residual": "B2 Standard residual correction",
     "fixed": "B3 Fixed-weight correction",
     "scalar_adaptive": "B4 Scalar least-squares adaptation (no XAI)",
     "standalone_feedback": "B5 Standalone component feedback",
     "credit_feedback": "B6 Proposed interaction-aware credit feedback",
+    "hourly_bias": "Same-hour rolling bias correction (no XAI)",
     "matched_scalar": "A1 One credit weight, matched settings",
     "matched_standalone": "A2 No interaction credit, matched settings",
     "no_context": "A3 No hour conditioning, matched settings",
@@ -89,43 +90,6 @@ def score_forecasts(frame, forecasts, thresholds, cfg, stage):
                             np.asarray(forecasts["base"])[mask],
                             np.asarray(forecasts["residual"])[mask],
                             cfg["evaluation"]["harm_tolerance"],
-                        ),
-                    }
-                )
-    return pd.DataFrame(rows)
-
-
-def compare_forecasts(frame, forecasts, thresholds, cfg):
-    rows = []
-    masks = scope_masks(frame, thresholds)
-    # Credit/memory and parameter sensitivity are descriptive ablations, not
-    # extra hypotheses in the original baseline-comparison bootstrap family.
-    references = [name for name in METHODS if name != PRIMARY]
-    comparisons = len(references) * sum(mask.any() for mask in masks.values())
-    y = frame.target_next_hour.to_numpy()
-    for reference in references:
-        difference = abs(forecasts[PRIMARY] - y) - abs(forecasts[reference] - y)
-        for scope, mask in masks.items():
-            if not mask.any():
-                continue
-            for block in cfg["evaluation"]["bootstrap_blocks_hours"]:
-                if block > len(
-                    pd.date_range(frame.target_time.min(), frame.target_time.max(), freq="h")
-                ):
-                    raise ValueError("Evaluation period is shorter than a bootstrap block.")
-                rows.append(
-                    {
-                        "A": PRIMARY,
-                        "B": reference,
-                        "scope": scope,
-                        **clock_loss_interval(
-                            frame.target_time,
-                            difference,
-                            mask,
-                            block=block,
-                            repeats=cfg["evaluation"]["bootstrap_repeats"],
-                            seed=cfg["seed"],
-                            comparisons=comparisons,
                         ),
                     }
                 )

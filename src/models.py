@@ -1,4 +1,4 @@
-"""Fixed base model; direct and residual HistGBR share OOF rows and inputs."""
+"""GBR/HistGBR base; direct and residual HistGBR share OOF rows and inputs."""
 
 import numpy as np
 import pandas as pd
@@ -9,10 +9,19 @@ from .feature_engineering import ERROR_FEATURES
 from .shap_explainer import explain_prediction
 
 
+def make_base_model(cfg):
+    """HistGBR reuses the fixed HistGBR settings from the development comparison."""
+    if cfg["base_model_family"] == "gbr":
+        return GradientBoostingRegressor(**cfg["base_model"], random_state=cfg["seed"])
+    if cfg["base_model_family"] == "histgbr":
+        return HistGradientBoostingRegressor(**cfg["residual_model"], random_state=cfg["seed"])
+    raise ValueError("base_model_family must be gbr or histgbr.")
+
+
 def base_forecast(training, valid, columns, cfg):
     if training.empty or valid.empty or training.target_time.max() > valid.origin_time.min():
         raise ValueError("Base model training targets were not available at the forecast origin.")
-    model = GradientBoostingRegressor(**cfg["base_model"], random_state=cfg["seed"])
+    model = make_base_model(cfg)
     model.fit(training[columns], training.target_next_hour)
     return model.predict(valid[columns])
 

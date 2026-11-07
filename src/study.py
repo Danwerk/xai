@@ -1,40 +1,22 @@
-"""One chronological experiment: development, frozen policies, then final evaluation."""
+"""In-memory training and development selection for the comparison notebook."""
 
 from copy import deepcopy
-from datetime import datetime, timezone
-from importlib.metadata import version
-from pathlib import Path
-import platform
-import subprocess
-import sys
 
 import numpy as np
 import pandas as pd
-from threadpoolctl import threadpool_limits
 
-from .common import (
-    ROOT,
-    config_reference,
-    read_json,
-    read_run_config,
-    sha256,
-    write_csv,
-    write_json,
-)
 from .correction import adaptive_correction
-from .evaluation import PRIMARY, METHODS, compare_forecasts, score_forecasts
-from .feature_engineering import feature_columns, known_error_features, load_dataset, split_year
+from .simple_correction import bias_forecast
+from .evaluation import PRIMARY, METHODS, score_forecasts
+from .feature_engineering import known_error_features, feature_columns, split_year
 from .models import base_forecast, residual_forecasts
-from .shap_explainer import repair_gain_attributions
 
 FAMILIES = {"scalar_adaptive": "scalar_ls", "standalone_feedback": "standalone", PRIMARY: "credit"}
 
 
-def now():
-    return datetime.now(timezone.utc).isoformat()
-
-
 def validate_config(cfg):
+    if cfg["base_model_family"] not in ("gbr", "histgbr"):
+        raise ValueError("base_model_family must be gbr or histgbr.")
     if cfg["load_delay_hours"] != 0 or cfg["weather_delay_hours"] < 1:
         raise ValueError(
             "Only immediate measured-load availability and delayed weather are supported."
@@ -77,37 +59,6 @@ def validate_config(cfg):
         raise ValueError("Primary block must belong to the declared sensitivity checks.")
 
 
-def source_hashes():
-    # Presentation changes must not invalidate frozen scientific choices.
-    paths = [
-        ROOT / "src" / name
-        for name in (
-            "common.py",
-            "data_preprocessing.py",
-            "feature_engineering.py",
-            "models.py",
-            "correction.py",
-            "shap_explainer.py",
-            "evaluation.py",
-            "study.py",
-        )
-    ] + [
-        ROOT / "run_pipeline.py",
-        ROOT / "requirements.txt",
-    ]
-    return {p.relative_to(ROOT).as_posix(): sha256(p) for p in paths}
-
-
-def git_state():
-    def git(*args):
-        result = subprocess.run(
-            ["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8"
-        )
-        return result.stdout.strip() if result.returncode == 0 else None
-
-    return {"revision": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
-
-
 def annual_forecast(frame, year, columns, cfg):
     train, hold = split_year(frame, year)
     hold["base_prediction"] = base_forecast(train, hold, columns, cfg)
@@ -141,6 +92,11 @@ def policy_candidates(cfg):
     grid = feedback_grid(cfg)
     return {
         "fixed": {f"fixed_{w}": {"weight": w} for w in cfg["selection"]["fixed_weights"]},
+        "hourly_bias": {
+            f"hourly_bias_w{w}_s{s}": {"window_hours": w, "strength": s}
+            for w in cfg["selection"]["feedback_windows_hours"]
+            for s in cfg["selection"]["feedback_strengths"]
+        },
         **{
             family: {f"{family}_{name}": setting for name, setting in grid.items()}
             for family in FAMILIES
@@ -261,6 +217,9 @@ def develop(history, columns, thresholds, cfg):
     candidates = policy_candidates(cfg)
     rows, folds = [], []
     for year, valid, forecasts, components in residual_development_folds(history, columns, cfg):
+        valid["prediction_residual"] = forecasts["residual"]
+        for name, setting in candidates["hourly_bias"].items():
+            forecasts[name] = bias_forecast(valid, setting, cfg["feedback"])
         for name, setting in candidates["fixed"].items():
             forecasts[name] = (
                 valid.base_prediction.to_numpy()
@@ -304,6 +263,10 @@ def policy_forecasts(valid, forecasts, components, selection, cfg):
     """Apply frozen choices and change one mechanism at a time in ablations."""
     forecasts = dict(forecasts)
     choices = selection["choices"]
+    valid = valid.assign(prediction_residual=forecasts["residual"])
+    forecasts["hourly_bias"] = bias_forecast(
+        valid, choices["hourly_bias"]["setting"], cfg["feedback"]
+    )
     weight = (choices["fixed"]["setting"] or {"weight": 1.0})["weight"]
     forecasts["fixed"] = (
         valid.base_prediction.to_numpy() + weight * components.sum(axis=1).to_numpy()
@@ -330,202 +293,3 @@ def policy_forecasts(valid, forecasts, components, selection, cfg):
     specs = variant_specs(primary, cfg, selection["decay"]["half_life_hours"])
     forecasts.update(variant_forecasts(valid, components, specs, cfg))
     return forecasts, traces
-
-
-def save_final(output, valid, forecasts, components, traces, thresholds, cfg):
-    predicted = valid[
-        ["origin_time", "target_time", "hour", "target_next_hour", "actual_ramp"]
-    ].copy()
-    for name in forecasts:
-        predicted[f"prediction_{name}"] = forecasts[name]
-    write_csv(output / "predictions.csv", predicted)
-    ledger = valid[["origin_time", "target_time"]].copy()
-    credit = repair_gain_attributions(
-        valid.target_next_hour, valid.base_prediction, components, "squared"
-    )
-    for i, group in enumerate(components):
-        ledger[f"potential_{group}"] = components[group].to_numpy()
-        ledger[f"potential_squared_credit_{group}"] = credit[:, i]
-        for name, weights in traces.items():
-            ledger[f"weight_{name}__{group}"] = weights[group].to_numpy()
-    write_csv(output / "feedback.csv", ledger)
-    scores = score_forecasts(valid, forecasts, thresholds, cfg, "final")
-    comparisons = compare_forecasts(valid, forecasts, thresholds, cfg)
-    write_csv(output / "metrics.csv", scores)
-    write_csv(output / "comparisons.csv", comparisons)
-    return scores
-
-
-def validate_frozen(selection, cfg, hashes):
-    if selection.get("config_ref") != config_reference(cfg) or selection["source_sha256"] != hashes:
-        raise ValueError(
-            "Frozen selection uses different configuration or study code. Reproduce development first."
-        )
-    if selection.get("status") != "frozen":
-        raise ValueError("Selection is not frozen.")
-
-
-def run_study(
-    cfg, output, datasets=("panama", "estonia"), selection_path=None, development_only=False
-):
-    validate_config(cfg)
-    if tuple(datasets) not in (("panama",), ("estonia",), ("panama", "estonia")):
-        raise ValueError("Evaluate Panama, Estonia, or Panama then Estonia.")
-    output = Path(output).resolve()
-    if output.exists() and any(output.iterdir()):
-        raise ValueError(
-            "Use a new or empty run directory; completed evidence is never overwritten."
-        )
-    if "panama" not in datasets and selection_path is None:
-        raise ValueError("Transfer-only evaluation needs an explicitly frozen selection file.")
-    if development_only and tuple(datasets) != ("panama",):
-        raise ValueError("Development-only mode applies to Panama only.")
-    output.mkdir(parents=True, exist_ok=True)
-    hashes = source_hashes()
-    manifest = {
-        "status": "running",
-        "protocol": cfg["protocol"],
-        "started_utc": now(),
-        "study_type": "retrospective_reanalysis",
-        "test_periods_previously_seen": True,
-        "config_ref": config_reference(cfg),
-        "source_sha256": hashes,
-        "git": git_state(),
-        "python": sys.version,
-        "platform": platform.platform(),
-        "packages": {
-            p: version(p)
-            for p in (
-                "numpy",
-                "pandas",
-                "scikit-learn",
-                "shap",
-                "scipy",
-                "matplotlib",
-                "threadpoolctl",
-            )
-        },
-        "datasets": {},
-    }
-    write_json(output / "manifest.json", manifest)
-    try:
-        frozen = read_json(selection_path) if selection_path else None
-        if frozen:
-            validate_frozen(frozen, cfg, hashes)
-        with threadpool_limits(limits=cfg["workers"]):
-            for dataset in datasets:
-                print(f"Dataset: {dataset}", flush=True)
-                opts = cfg["datasets"][dataset]
-                raw_path = ROOT / opts["path"]
-                raw_hash = sha256(raw_path)
-                frame, quality = load_dataset(raw_path, cfg, dataset)
-                base_columns, columns = feature_columns(dataset)
-                initial = frame[frame.target_time < opts["threshold_end"]]
-                if initial.empty:
-                    raise ValueError("No pre-development threshold observations.")
-                thresholds = {
-                    "increase": float(initial.actual_ramp.quantile(0.95)),
-                    "decrease": float(initial.actual_ramp.quantile(0.05)),
-                }
-                folder = output / dataset
-                write_csv(
-                    folder / "training_summary.csv",
-                    initial[columns].describe().T.reset_index(names="feature"),
-                )
-                history = oof_history(frame, opts["test_year"], base_columns, cfg)
-                if dataset == "panama":
-                    # Development receives no final-year rows, predictions or losses.
-                    development, choices, decay = develop(history, columns, thresholds, cfg)
-                    write_csv(folder / "development.csv", development)
-                    frozen = {
-                        "status": "frozen",
-                        "selected_utc": now(),
-                        "config_ref": config_reference(cfg),
-                        "source_sha256": hashes,
-                        "development_raw_sha256": raw_hash,
-                        "development_years": opts["development_years"],
-                        "choices": choices,
-                        "decay": decay,
-                        "selection_rule": "minimum mean scope/year MAE ratio; each ratio <= declared maximum; full correction fallback; identity wins exact ties",
-                    }
-                validate_frozen(frozen, cfg, hashes)
-                if (
-                    sha256(ROOT / cfg["datasets"]["panama"]["path"])
-                    != frozen["development_raw_sha256"]
-                ):
-                    raise ValueError("Development source changed after selection.")
-                write_json(output / "selection.json", frozen)
-                record = {
-                    "raw_sha256": raw_hash,
-                    "thresholds": thresholds,
-                    "quality": quality,
-                    "base_features": base_columns,
-                    "correction_features": columns,
-                    "selection_frozen_utc": frozen["selected_utc"],
-                    "evaluation_status": "not_evaluated",
-                }
-                manifest["datasets"][dataset] = record
-                write_json(output / "manifest.json", manifest)
-                if development_only:
-                    continue
-                # Final-year models/predictions are created only AFTER the file above exists.
-                hold = annual_forecast(frame, opts["test_year"], base_columns, cfg)
-                combined = pd.concat(
-                    [
-                        history.drop(columns=[c for c in history if c.startswith("known_error")]),
-                        hold,
-                    ],
-                    ignore_index=True,
-                )
-                combined = pd.concat([combined, known_error_features(combined)], axis=1)
-                train, valid = split_year(combined, opts["test_year"])
-                forecasts, components, inputs = residual_forecasts(train, valid, columns, cfg)
-                forecasts, traces = policy_forecasts(valid, forecasts, components, frozen, cfg)
-                scores = save_final(folder, valid, forecasts, components, traces, thresholds, cfg)
-                record.update(
-                    evaluation_status="complete",
-                    evaluated_utc=now(),
-                    training_target_max=str(train.target_time.max()),
-                    training_n=len(train),
-                    residual_and_direct_features=inputs,
-                    component_groups=list(components),
-                    test_first=str(valid.target_time.min()),
-                    test_last=str(valid.target_time.max()),
-                )
-                print(
-                    scores[scores.scope.eq("overall")][
-                        ["method", "MAE", "harmful_rate_vs_base"]
-                    ].to_string(index=False),
-                    flush=True,
-                )
-                if sha256(raw_path) != raw_hash:
-                    raise ValueError("Source data changed during evaluation.")
-        read_run_config(manifest)
-        if source_hashes() != hashes:
-            raise ValueError("Study code changed during the run.")
-        manifest.update(
-            status="development_complete" if development_only else "complete", finished_utc=now()
-        )
-        manifest["artifact_sha256"] = {
-            p.relative_to(output).as_posix(): sha256(p)
-            for p in sorted(output.rglob("*"))
-            if p.is_file() and p.name != "manifest.json"
-        }
-        write_json(output / "manifest.json", manifest)
-        if not development_only:
-            write_json(
-                ROOT / "results/latest_thesis_run.json",
-                {
-                    "path": (
-                        str(output.relative_to(ROOT))
-                        if output.is_relative_to(ROOT)
-                        else str(output)
-                    ),
-                    "manifest_sha256": sha256(output / "manifest.json"),
-                },
-            )
-        return output
-    except Exception as exc:
-        manifest.update(status="failed", error=str(exc), finished_utc=now())
-        write_json(output / "manifest.json", manifest)
-        raise
