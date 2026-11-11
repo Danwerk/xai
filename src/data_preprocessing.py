@@ -54,7 +54,7 @@ def load_and_audit(path):
             for c in ("holiday", "school")
         },
         "holiday_disagreements": int(((df.Holiday_ID > 0) != (df.holiday == 1)).sum()),
-        "timezone": "Ajatemplid märgendamata; Panama kohalik aeg UTC−05:00 on allikakirjeldusel põhinev eeldus.",
+        "timezone": "CSV ajatemplid on nihketa; Panama kohalikuna käsitlemine on arvutuse eeldus, mitte CSV-s kinnitatud metaandmed.",
         "outlier_policy": "Ebatavalisi positiivseid koormusi ei eemaldata ega asendata.",
     }
     return df, audit

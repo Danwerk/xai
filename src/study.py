@@ -57,6 +57,25 @@ def validate_config(cfg):
         raise ValueError("Invalid bootstrap configuration.")
     if cfg["evaluation"]["primary_block_hours"] not in cfg["evaluation"]["bootstrap_blocks_hours"]:
         raise ValueError("Primary block must belong to the declared sensitivity checks.")
+    xai = cfg["xai_comparison"]
+    if any(not isinstance(xai[name], int) or xai[name] < 1
+           for name in ("background_size", "lime_samples", "batch_rows", "benchmark_rows", "timing_repeats")):
+        raise ValueError("XAI sample sizes and timing repeats must be positive integers.")
+    if (xai["lime_samples"] < 2 or not np.isfinite(xai["lime_kernel_width"])
+            or xai["lime_kernel_width"] <= 0 or not np.isfinite(xai["lime_ridge_alpha"])
+            or xai["lime_ridge_alpha"] < 0):
+        raise ValueError("Invalid LIME sampling, kernel width or regularization.")
+    seeds = xai["stability_seeds"]
+    if not seeds or len(seeds) != len(set(seeds)) or any(not isinstance(s, int) or s < 0 for s in seeds):
+        raise ValueError("Background sensitivity needs unique nonnegative integer seeds.")
+    year = cfg["combined_correction"]["test_year"]
+    if not isinstance(year, int) or year <= cfg["datasets"]["estonia"]["test_year"]:
+        raise ValueError("Combined-correction confirmation must follow the previous Estonian test year.")
+    diagnostics = cfg["diagnostics"]
+    if (not np.isfinite(diagnostics["change_tolerance"]) or diagnostics["change_tolerance"] <= 0
+            or any(not isinstance(diagnostics[name], int) or diagnostics[name] < 0
+                   for name in ("case_hours_before", "case_hours_after"))):
+        raise ValueError("Diagnostics require positive tolerance and nonnegative case windows.")
 
 
 def annual_forecast(frame, year, columns, cfg):
@@ -213,7 +232,7 @@ def select_decay(scores, cfg):
     }
 
 
-def develop(history, columns, thresholds, cfg):
+def develop(history, columns, thresholds, cfg, *, return_folds=False):
     candidates = policy_candidates(cfg)
     rows, folds = [], []
     for year, valid, forecasts, components in residual_development_folds(history, columns, cfg):
@@ -256,7 +275,8 @@ def develop(history, columns, thresholds, cfg):
     }
     selected.add(decay["candidate"])
     scores["selected"] = scores.method.isin(selected)
-    return scores, choices, decay
+    result = (scores, choices, decay)
+    return (*result, folds) if return_folds else result
 
 
 def policy_forecasts(valid, forecasts, components, selection, cfg):

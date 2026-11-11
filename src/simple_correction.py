@@ -1,22 +1,31 @@
-"""Same-hour rolling bias correction, without SHAP or file output."""
+"""Same-hour rolling bias correction and one fixed two-stage comparison, in memory."""
 
 import numpy as np
 import pandas as pd
 
+from .correction import adaptive_correction
 
-def bias_forecast(frame, setting, feedback):
-    """Add a past same-hour mean error to the standard residual forecast.
+
+def bias_forecast(frame, setting, feedback, *, reference=None):
+    """Add a past same-hour mean error to a supplied forecast stream.
 
     frame needs origin_time, target_time, hour, target_next_hour and
-    prediction_residual. Each prediction uses only earlier target outcomes.
-    Errors refer to the unchanged residual forecast, not this method's output.
+    prediction_residual (unless reference is supplied). Each prediction uses
+    only earlier target outcomes. Errors refer to the supplied first-stage
+    stream, not to this method's output or another method's errors.
 
     setting contains window_hours and strength; None returns the unchanged
     forecast. feedback contains min_history_points and warmup_hours, using the
     same cold-start convention as src.correction.adaptive_correction.
     Returns an array aligned to frame, without changing inputs or writing files.
     """
-    reference = frame.prediction_residual.to_numpy(dtype=float)
+    if reference is None:
+        reference = frame.prediction_residual.to_numpy(dtype=float)
+    elif isinstance(reference, pd.Series) and not reference.index.equals(frame.index):
+        raise ValueError("Reference forecasts must align with the frame index.")
+    reference = np.asarray(reference, dtype=float)
+    if reference.shape != (len(frame),) or not np.isfinite(reference).all():
+        raise ValueError("Reference forecasts must be a finite aligned one-dimensional vector.")
     if setting is None:
         return reference.copy()
     times = pd.DatetimeIndex(frame.target_time)
@@ -57,3 +66,26 @@ def bias_forecast(frame, setting, feedback):
     warmup = times < times.min() + pd.Timedelta(hours=feedback["warmup_hours"])
     correction.loc[warmup] = 0
     return reference + setting["strength"] * correction.to_numpy()
+
+
+def combined_forecasts(frame, components, xai_setting, bias_setting, feedback):
+    """One fixed XAI + bias experiment and its matched no-XAI control.
+
+    XAI and scalar feedback share settings. The scalar control consumes only
+    the full residual prediction, without any explanation. Both second stages
+    use their OWN first-stage past errors with the same bias settings.
+    """
+    residual = frame.prediction_residual.to_numpy(dtype=float)
+    np.testing.assert_allclose(frame.base_prediction + components.sum(axis=1), residual, atol=1e-6)
+    xai, _, _ = adaptive_correction(frame, components, xai_setting, "credit", feedback)
+    total = pd.DataFrame({"total": residual - frame.base_prediction.to_numpy()}, index=frame.index)
+    scalar, _, _ = adaptive_correction(frame, total, xai_setting, "scalar_credit", feedback)
+    return {
+        "base": frame.base_prediction.to_numpy(),
+        "residual": residual.copy(),
+        "hourly_bias": bias_forecast(frame, bias_setting, feedback),
+        "credit_feedback": xai,
+        "matched_scalar": scalar,
+        "xai_bias": bias_forecast(frame, bias_setting, feedback, reference=xai),
+        "scalar_bias": bias_forecast(frame, bias_setting, feedback, reference=scalar),
+    }

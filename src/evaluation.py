@@ -19,6 +19,74 @@ METHODS = {
 }
 
 
+def persistence_forecast(frame):
+    """One-hour naive forecast: reuse the most recently completed load interval.
+
+    No fitting, target values, grouping or feedback. Use the caller's common
+    evaluation rows; this does not claim coverage of otherwise unscored hours.
+    """
+    values = frame.load_now.to_numpy(dtype=float, copy=True)
+    if (frame.empty or not np.isfinite(values).all()
+            or not frame.target_time.sub(frame.origin_time).eq(pd.Timedelta(hours=1)).all()):
+        raise ValueError("Persistence requires finite available load and a one-hour forecast horizon.")
+    return values
+
+
+def correction_diagnostics(frame, components, weights, prediction, *, tolerance=1e-6):
+    """Retrospective activity, cancellation and loss changes, without model fitting.
+
+    Explain the change from the SAME unweighted residual forecast. Sum of
+    (weight - 1) * component must reconstruct that change. Offset is included
+    as a component but is not a physical input feature. Opposite component
+    changes can cancel: 1 - abs(sum(delta)) / sum(abs(delta)). No-activity
+    conditional statistics are NaN, not an observed zero success rate.
+    """
+    predicted = np.asarray(prediction, dtype=float)
+    if (frame.empty or not frame.index.equals(components.index)
+            or not components.index.equals(weights.index)
+            or not components.columns.equals(weights.columns)
+            or predicted.shape != (len(frame),)
+            or not np.isfinite(tolerance) or tolerance <= 0
+            or not np.isfinite(components.to_numpy()).all()
+            or not np.isfinite(weights.to_numpy()).all()
+            or not np.isfinite(predicted).all()
+            or not weights.ge(0).all().all() or not weights.le(1).all().all()):
+        raise ValueError("Diagnostics require finite aligned components, bounded weights and predictions.")
+    reference = frame.prediction_residual.to_numpy(dtype=float)
+    actual = frame.target_next_hour.to_numpy(dtype=float)
+    if not np.isfinite([reference, actual]).all():
+        raise ValueError("Diagnostics require finite reference forecasts and outcomes.")
+    np.testing.assert_allclose(frame.base_prediction + components.sum(axis=1), reference,
+                               rtol=1e-9, atol=1e-7)
+    delta = components * (weights - 1)
+    net = delta.sum(axis=1).to_numpy()
+    np.testing.assert_allclose(predicted - reference, net, rtol=1e-9, atol=1e-7)
+    gross = delta.abs().sum(axis=1).to_numpy()
+    parts_changed, changed = gross > tolerance, np.abs(net) > tolerance
+    ratio = np.divide(np.abs(net), gross, out=np.zeros_like(net), where=parts_changed)
+    cancellation = np.where(parts_changed, np.clip(1 - ratio, 0, 1), np.nan)
+    gain = abs(actual - reference) - abs(actual - predicted)
+    details = pd.DataFrame({
+        "parts_changed": parts_changed, "prediction_changed": changed,
+        "net_change": net, "gross_change": gross, "cancellation_share": cancellation,
+        "gain_vs_residual": gain,
+        "helped": gain > tolerance, "harmed": gain < -tolerance,
+        "changed_components": delta.abs().gt(tolerance).sum(axis=1).to_numpy(),
+    }, index=frame.index)
+    summary = {
+        "n": len(frame), "changed_hours": int(changed.sum()),
+        "changed_pct": float(100 * changed.mean()),
+        "parts_changed_pct": float(100 * parts_changed.mean()),
+        "mean_abs_change": float(np.abs(net).mean()),
+        "mean_abs_change_when_changed": float(np.abs(net[changed]).mean()) if changed.any() else np.nan,
+        "helped_pct_when_changed": float(100 * (gain[changed] > tolerance).mean()) if changed.any() else np.nan,
+        "harmed_pct_when_changed": float(100 * (gain[changed] < -tolerance).mean()) if changed.any() else np.nan,
+        "mae_gain_overall": float(gain.mean()),
+        "mean_cancellation_when_parts_change": float(cancellation[parts_changed].mean()) if parts_changed.any() else np.nan,
+    }
+    return details, summary
+
+
 def prediction_metrics(actual, predicted):
     y, p = np.asarray(actual, float), np.asarray(predicted, float)
     if y.ndim != 1 or not len(y) or p.shape != y.shape or not np.isfinite([y, p]).all():

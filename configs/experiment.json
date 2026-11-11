@@ -72,6 +72,24 @@
     "windows_hours": [168, 336, 672],
     "strengths": [0.25, 0.5, 1.0]
   },
+  "xai_comparison": {
+    "background_size": 32,
+    "lime_samples": 512,
+    "lime_kernel_width": 0.75,
+    "lime_ridge_alpha": 1.0,
+    "batch_rows": 128,
+    "benchmark_rows": 64,
+    "timing_repeats": 3,
+    "stability_seeds": [42, 43, 44]
+  },
+  "combined_correction": {
+    "test_year": 2025
+  },
+  "diagnostics": {
+    "change_tolerance": 0.000001,
+    "case_hours_before": 6,
+    "case_hours_after": 6
+  },
   "evaluation": {
     "bootstrap_blocks_hours": [
       24,

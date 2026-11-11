@@ -5,7 +5,10 @@ import pandas as pd
 import pytest
 
 from src.correction import adaptive_correction, past_average
-from src.evaluation import clock_loss_interval, forecast_metrics, scenario_loss_interval
+from src.evaluation import (
+    clock_loss_interval, correction_diagnostics, forecast_metrics,
+    persistence_forecast, scenario_loss_interval,
+)
 from src.shap_explainer import repair_gain_attributions
 
 
@@ -127,3 +130,61 @@ def test_clock_bootstrap_masks_missing_calendar_hours():
     b = scenario_loss_interval(padded, mask, **args)
     assert a == b
     assert a["adjusted_low"] <= a["ci_low"] <= a["ci_high"] <= a["adjusted_high"]
+
+
+def test_persistence_uses_only_available_load_on_the_supplied_rows():
+    times = pd.date_range("2025-01-01", periods=4, freq="h")
+    frame = pd.DataFrame({"target_time": times, "origin_time": times - pd.Timedelta(hours=1),
+                          "load_now": [100, 110, 105, 120], "target_next_hour": [110, 105, 120, 125]})
+    before = persistence_forecast(frame)
+    np.testing.assert_array_equal(before, [100, 110, 105, 120])
+    frame["target_next_hour"] = -1e9
+    np.testing.assert_array_equal(persistence_forecast(frame), before)
+    before[0] = 0
+    assert frame.load_now.iloc[0] == 100
+    with pytest.raises(ValueError):
+        persistence_forecast(frame.assign(origin_time=times - pd.Timedelta(hours=2)))
+
+
+def diagnostic_example():
+    frame = pd.DataFrame({"base_prediction": [10., 8., 8.], "prediction_residual": [10., 10., 10.],
+                          "target_next_hour": [10., 8., 12.]})
+    components = pd.DataFrame({"one": [2., 2., 2.], "two": [-2., 0., 0.]})
+    weights = pd.DataFrame({"one": [0., 0., 0.], "two": [0., 1., 1.]})
+    predicted = frame.base_prediction + (components * weights).sum(axis=1)
+    return frame, components, weights, predicted
+
+
+def test_diagnostics_separate_cancellation_activity_and_realised_gain():
+    frame, components, weights, predicted = diagnostic_example()
+    details, summary = correction_diagnostics(frame, components, weights, predicted)
+    np.testing.assert_allclose(details.net_change, [0, -2, -2])
+    np.testing.assert_allclose(details.cancellation_share, [1, 0, 0])
+    np.testing.assert_allclose(details.gain_vs_residual, [0, 2, -2])
+    assert summary["changed_hours"] == 2
+    assert summary["parts_changed_pct"] == 100
+    assert summary["helped_pct_when_changed"] == summary["harmed_pct_when_changed"] == 50
+    assert summary["mae_gain_overall"] == 0
+    assert summary["mean_cancellation_when_parts_change"] == pytest.approx(1/3)
+    original = frame.copy()
+    correction_diagnostics(frame, components, weights, predicted)
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_diagnostics_identity_has_no_activity_and_no_conditional_success_rate():
+    frame, components, weights, _ = diagnostic_example()
+    weights[:] = 1
+    details, summary = correction_diagnostics(frame, components, weights, frame.prediction_residual)
+    assert summary["changed_hours"] == 0 and summary["changed_pct"] == 0
+    assert np.isnan(summary["helped_pct_when_changed"])
+    assert details.cancellation_share.isna().all()
+
+
+def test_diagnostics_reject_wrong_reconstruction_and_alignment():
+    frame, components, weights, predicted = diagnostic_example()
+    with pytest.raises(AssertionError):
+        correction_diagnostics(frame, components, weights, predicted + 1)
+    with pytest.raises(ValueError):
+        correction_diagnostics(frame, components, weights[weights.columns[::-1]], predicted)
+    with pytest.raises(ValueError):
+        correction_diagnostics(frame, components, weights + 2, predicted)

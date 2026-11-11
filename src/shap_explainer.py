@@ -54,14 +54,13 @@ def repair_gain_attributions(actual, baseline, corrections, loss="absolute"):
 
 
 def explain_prediction(model, X):
+    """Exact path-dependent TreeSHAP decomposition of the raw model prediction."""
     explainer = shap.TreeExplainer(
         model, feature_perturbation="tree_path_dependent", model_output="raw"
     )
     explanation = explainer(X, check_additivity=True)
     values = np.asarray(explanation.values)
     base = np.broadcast_to(np.asarray(explanation.base_values).reshape(-1), (len(X),))
-    reconstructed = values.sum(axis=1) + base
-    predicted = model.predict(X)
-    if not np.allclose(reconstructed, predicted, rtol=1e-7, atol=1e-6):
-        raise ValueError("SHAP-i liidetavuse kontroll ebaõnnestus.")
+    if not np.allclose(values.sum(axis=1) + base, model.predict(X), rtol=1e-7, atol=1e-6):
+        raise ValueError("TreeSHAP does not reconstruct the fitted model prediction.")
     return pd.DataFrame(values, index=X.index, columns=X.columns), base

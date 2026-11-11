@@ -70,7 +70,12 @@ def test_in_memory_training_and_all_policies_write_no_files(cfg, tmp_path, monke
     thresholds = {"increase": 2.0, "decrease": -2.0}
     with threadpool_limits(limits=1):
         history = oof_history(data, 2020, base_columns, cfg)
-        scores, choices, decay = develop(history, columns, thresholds, cfg)
+        scores, choices, decay, folds = develop(history, columns, thresholds, cfg, return_folds=True)
+        assert [int(valid.target_time.dt.year.iloc[0]) for valid, _, _ in folds] == [2018, 2019]
+        for fold_frame, fold_parts, fold_forecasts in folds:
+            assert fold_frame.index.equals(fold_parts.index)
+            np.testing.assert_allclose(fold_frame.base_prediction + fold_parts.sum(axis=1),
+                                       fold_forecasts["residual"])
         assert set(scores.year) == {2018, 2019}
         assert scores.stage.eq("development").all()
         before = deepcopy(choices)
@@ -86,3 +91,9 @@ def test_in_memory_training_and_all_policies_write_no_files(cfg, tmp_path, monke
     assert weights["credit_feedback"].ge(0).all().all()
     assert weights["credit_feedback"].le(1).all().all()
     assert not list(tmp_path.iterdir())
+
+
+def test_confirmation_year_must_follow_the_previous_test(cfg):
+    cfg["combined_correction"]["test_year"] = cfg["datasets"]["estonia"]["test_year"]
+    with pytest.raises(ValueError, match="confirmation"):
+        validate_config(cfg)
