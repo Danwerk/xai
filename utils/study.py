@@ -31,11 +31,11 @@ def validate_config(cfg):
         boundary = min(years) if years else options["test_year"]
         if pd.Timestamp(options["threshold_end"]) > pd.Timestamp(f"{boundary}-01-01"):
             raise ValueError("Scenario thresholds cannot use development/test targets.")
-    if (
-        not cfg["datasets"]["panama"]["development_years"]
-        or cfg["datasets"]["estonia"]["development_years"]
-    ):
-        raise ValueError("Develop in Panama; transfer without Estonian parameter selection.")
+    if not cfg["datasets"].get("panama", {}).get("development_years"):
+        raise ValueError("Panama development years must be specified.")
+    if any(options["development_years"] for name, options in cfg["datasets"].items()
+           if name != "panama"):
+        raise ValueError("Correction settings are selected only on Panama development years.")
     selection = cfg["selection"]
     if 1.0 not in selection["fixed_weights"] or any(
         not 0 <= v <= 1 for v in selection["fixed_weights"]
@@ -68,9 +68,9 @@ def validate_config(cfg):
     seeds = xai["stability_seeds"]
     if not seeds or len(seeds) != len(set(seeds)) or any(not isinstance(s, int) or s < 0 for s in seeds):
         raise ValueError("Background sensitivity needs unique nonnegative integer seeds.")
-    year = cfg["combined_correction"]["test_year"]
-    if not isinstance(year, int) or year <= cfg["datasets"]["estonia"]["test_year"]:
-        raise ValueError("Combined-correction confirmation must follow the previous Estonian test year.")
+    combined_dataset = cfg["combined_correction"]["dataset"]
+    if combined_dataset not in cfg["datasets"]:
+        raise ValueError("Combined correction must use an active evaluation dataset.")
     diagnostics = cfg["diagnostics"]
     if (not np.isfinite(diagnostics["change_tolerance"]) or diagnostics["change_tolerance"] <= 0
             or any(not isinstance(diagnostics[name], int) or diagnostics[name] < 0

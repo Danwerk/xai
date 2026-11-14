@@ -16,7 +16,7 @@ def bias_forecast(frame, setting, feedback, *, reference=None):
 
     setting contains window_hours and strength; None returns the unchanged
     forecast. feedback contains min_history_points and warmup_hours, using the
-    same cold-start convention as src.correction.adaptive_correction.
+    same cold-start convention as utils.correction.adaptive_correction.
     Returns an array aligned to frame, without changing inputs or writing files.
     """
     if reference is None:

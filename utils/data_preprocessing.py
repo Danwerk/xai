@@ -10,16 +10,16 @@ WEATHER = [f"{v}_{c}" for c in ("toc", "san", "dav") for v in ("T2M", "QV2M", "T
 def load_and_audit(path):
     if not Path(path).is_file():
         raise FileNotFoundError(
-            f"Algandmestik puudub: {path}. Lisa tegelik CSV; sünteetilist asendust ei looda."
+            f"Source dataset is missing: {path}. Provide the measured CSV data."
         )
     df = pd.read_csv(path)
     df.columns = df.columns.str.strip()
     required = {"datetime", "nat_demand", *WEATHER, "holiday", "school", "Holiday_ID"}
     if missing := required - set(df):
-        raise ValueError(f"Puuduvad veerud: {sorted(missing)}")
+        raise ValueError(f"Missing columns: {sorted(missing)}")
     df["datetime"] = pd.to_datetime(df["datetime"], errors="raise")
     if df.datetime.isna().any() or df.datetime.dt.tz is not None:
-        raise ValueError("Oodatakse kehtivaid kohaliku Panama aja ajatempleid ilma nihketa.")
+        raise ValueError("Expected valid timezone-naive timestamps interpreted as local Panama time.")
     original_types = df.dtypes.astype(str).to_dict()
     for col in required - {"datetime"}:
         df[col] = pd.to_numeric(df[col], errors="raise")
@@ -54,8 +54,8 @@ def load_and_audit(path):
             for c in ("holiday", "school")
         },
         "holiday_disagreements": int(((df.Holiday_ID > 0) != (df.holiday == 1)).sum()),
-        "timezone": "CSV ajatemplid on nihketa; Panama kohalikuna käsitlemine on arvutuse eeldus, mitte CSV-s kinnitatud metaandmed.",
-        "outlier_policy": "Ebatavalisi positiivseid koormusi ei eemaldata ega asendata.",
+        "timezone": "CSV timestamps have no offset; local Panama time is an assumption, not confirmed CSV metadata.",
+        "outlier_policy": "Unusual positive load values are retained without replacement.",
     }
     return df, audit
 
@@ -74,9 +74,9 @@ def validate_for_modeling(df, audit):
         or df.isna().any().any()
     ):
         raise ValueError(
-            "Andmekvaliteet ei võimalda modelleerimist; vaata tagastatud auditit. Andmeid ei parandata automaatselt."
+            "Data quality prevents modelling; inspect the audit. Source values are not automatically repaired."
         )
     for c in ("holiday", "school"):
         if not df[c].isin([0, 1]).all():
-            raise ValueError(f"{c} ei ole binaarne.")
+            raise ValueError(f"{c} must be binary.")
     return df

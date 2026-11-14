@@ -115,7 +115,15 @@ tegelikule vajadusele.
   kasuta sisuliselt sobivat skaalat ja säilita ülejäänud üldkujundus.
 - Kohanda võimaluse korral ka teiste visualiseerimisteekide joonised
   sama üldise stiiliga.
-- Hoia pealkirjad, teljed, ühikud, legendid ja arvude täpsus selged.
+- Vaikimisi ära lisa graafikule üldpealkirja.
+- Kirjelda graafiku eesmärki notebook'i eelnevas Markdowni tekstis.
+- Lõputöös lisatakse joonise number ja kirjeldav allkiri dokumendis.
+- Säilita telgede nimetused, ühikud, legendid ja vajalikud annotatsioonid.
+- Hoia arvude täpsus selge ja võrreldavatel joonistel järjepidev.
+- Mitme paneeliga joonistel kasuta vajaduse korral lühikesi
+  paneelipealkirju.
+- Lisa üldpealkiri siis, kui kasutaja seda soovib või joonise
+  eraldiseisev kasutus seda vajab.
 - Vormindatud tulemuste tabelites järgi sama kujundusloogikat;
   tavalised andmetabelite väljundid võivad jääda vaikekujule.
 - Kuva joonised notebook'is ja ekspordi neid ainult kasutaja soovil.
@@ -143,3 +151,16 @@ tegelikule vajadusele.
   tulemused ja valikute põhjendused vastavates notebook'ides.
 - Väldi sama info kordamist README-s ja notebook'ides.
 - Ära loo eraldi dokumentatsioonifaile ilma kasutaja soovita.
+
+## Projekti keel
+
+- Kasuta notebook'ide pealkirjades, Markdowni selgitustes,
+  tulemuste tõlgendustes ja järeldustes inglise keelt.
+- Kasuta inglise keelt koodi kommentaarides, docstring'ides,
+  muutujate ja funktsioonide nimedes ning failinimedes.
+- Graafikute teljed, legendid, annotatsioonid ja paneelipealkirjad
+  ning tulemuste tabelite kuvatekstid peavad olema inglise keeles.
+- Kirjuta README.md inglise keeles.
+- Säilita lähteandmete algsed veerunimed ja väärtused;
+  vajaduse korral lisa analüüsiks ingliskeelsed vasted.
+- Kasutajaga suhtle tema kasutatavas keeles.

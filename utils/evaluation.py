@@ -167,15 +167,15 @@ def score_forecasts(frame, forecasts, thresholds, cfg, stage):
 def scenario_loss_interval(
     loss_difference, scenario_mask, block=168, repeats=2000, seed=42, comparisons=2
 ):
-    """Vali terveid ajaplokke; arvuta vahe ainult neis olevatel sihttundidel.
+    """Resample complete time blocks and evaluate only eligible target hours.
 
-    Vahe on uue reegli absoluutviga miinus senise reegli absoluutviga.
-    Olukorrasilt liigub koos tunniga, et sündmuste koondumine ajas säiliks.
+    Differences are the new rule's absolute error minus the reference error.
+    Scenario labels travel with each hour to preserve event clustering.
     """
     difference = np.asarray(loss_difference, dtype=float)
     mask = np.asarray(scenario_mask, dtype=bool)
     if len(difference) != len(mask) or not mask.any() or not 1 <= block <= len(mask):
-        raise ValueError("Paarisvõrdlus vajab sama tunni vigu ja olukorrasilte.")
+        raise ValueError("Paired comparisons require aligned hourly errors and scenario labels.")
 
     rng = np.random.default_rng(seed)
     count = len(difference)

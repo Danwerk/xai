@@ -1,10 +1,21 @@
 """Reusable Matplotlib styles, charts and diagram primitives.
 
-Use ``with plot_style():`` for TalTech colours and Verdana (with a portable
-fallback), or choose ``"analysis"`` / ``"presentation"`` for the notebook's
-existing styles. Importing this module never changes global rcParams, trains
-models, displays figures or writes files. All drawing helpers return artists
-so callers can further customise them, show them or explicitly save them.
+Use ``with plot_style("taltech"):`` for TalTech colours and Verdana (with a
+portable fallback). Pass ``overrides=ANALYSIS_SIZES`` for compact notebook
+figures. Drawing helpers return artists for further customisation.
+
+Example::
+
+    from utils.plotting import TALTECH_COLORS, horizontal_bars, plot_style
+
+    with plot_style("taltech", overrides={"font.size": 12}):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        horizontal_bars(ax, ["A", "B"], [12.4, 10.8], TALTECH_COLORS["accent"])
+        ax.set_xlabel("MAE")
+        fig.tight_layout()
+
+Call ``plt.show()`` to display the figure; export with ``fig.savefig(...)``
+only when needed. Importing this module does not change global rcParams.
 """
 
 import matplotlib.pyplot as plt
@@ -18,9 +29,11 @@ from matplotlib.patches import Circle, Rectangle
 # Colours used by the existing TalTech presentation diagrams.
 TALTECH_COLORS = {
     "ink": "#342b60",
+    "ink_light": "#827b9c",
     "accent": "#e4067e",
     "burgundy": "#aa1352",
     "cyan": "#4dbed2",
+    "cyan_dark": "#277786",
     "muted": "#6b687b",
     "line": "#9396b0",
     "border": "#dadae4",
@@ -83,6 +96,12 @@ TALTECH_STYLE = {
     "axes.prop_cycle": plt.cycler(color=[
         TALTECH_COLORS[name] for name in ("ink", "accent", "burgundy", "cyan", "line")
     ]),
+}
+
+# Reuse the analysis sizes while keeping the TalTech colours and font.
+ANALYSIS_SIZES = {
+    key: ANALYSIS_STYLE[key]
+    for key in ("font.size", "axes.titlesize", "axes.labelsize", "xtick.labelsize", "ytick.labelsize")
 }
 
 
@@ -165,7 +184,7 @@ def analysis_intervals(ax, values, labels, colors):
             xerr=[[row.difference - row.adjusted_low], [row.adjusted_high - row.difference]],
             fmt="o", color=color, markersize=6, elinewidth=1.8, capsize=4, capthick=1.2,
         ))
-    ax.axvline(0, color="#7c8998", linestyle=(0, (4, 4)), linewidth=1.1)
+    ax.axvline(0, color=TALTECH_COLORS["line"], linestyle=(0, (4, 4)), linewidth=1.1)
     ax.set_yticks(range(len(values)), labels)
     ax.set_ylim(len(values) - 0.45, -0.55)
     ax.spines["left"].set_visible(False)
@@ -186,7 +205,7 @@ def presentation_frame(subtitle="", *, figsize=(16, 9)):
     """Create a white slide-sized figure, optionally with a subtitle."""
     fig = plt.figure(figsize=figsize, facecolor="white")
     if subtitle:
-        fig.text(0.06, 0.86, subtitle, fontsize=17, color="#536579")
+        fig.text(0.06, 0.86, subtitle, fontsize=17, color=TALTECH_COLORS["muted"])
     return fig
 
 
@@ -196,7 +215,7 @@ def presentation_bars(ax, labels, values, colors, digits=4):
         ax, labels, values, colors, digits=digits, height=0.57,
         label_size=15, label_padding=8, headroom=1.22,
     )
-    analysis_grid(ax, color="#e8edf1")
+    analysis_grid(ax)
     return bars
 
 

@@ -171,6 +171,24 @@ def load_dataset(path, cfg, dataset):
     return frame, quality
 
 
+def load_panama_development(path, cfg):
+    """Prepare the shared development input without reading the evaluation year into features."""
+    raw, quality = load_and_audit(path)
+    validate_for_modeling(raw, quality)
+    cutoff = f"{cfg['datasets']['panama']['test_year']}-01-01"
+    development_raw = raw[raw.datetime < cutoff].copy()
+    return build_features(development_raw, cfg, "panama"), quality
+
+
+def ramp_thresholds(frame, threshold_end):
+    """Fix evaluation group boundaries using only the period before development."""
+    initial = frame[frame.target_time < threshold_end]
+    return {
+        "increase": float(initial.actual_ramp.quantile(0.95)),
+        "decrease": float(initial.actual_ramp.quantile(0.05)),
+    }
+
+
 def known_error_features(history):
     """Residual y-f whose target has arrived by the current forecast origin."""
     times = pd.DatetimeIndex(history.target_time)
