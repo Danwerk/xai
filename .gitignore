@@ -14,7 +14,6 @@ venv/
 # Andmestik
 data/raw/*.csv
 
-# Kohalikud Jupyteri käivitusandmed ja testide vahemälu
+# Kohalikud Jupyteri käivitusandmed
 .jupyter/
-.pytest_cache/
 
